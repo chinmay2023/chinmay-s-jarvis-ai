@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - JARVIS AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #0d0f12; color: #fff; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
+        .card { background: #1a1d24; padding: 40px; border-radius: 10px; width: 420px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        h2 { color: #00d2ff; margin-bottom: 20px; letter-spacing: 1px; }
+        
+        /* Form Field Styling */
+        .form-group { margin-bottom: 15px; text-align: left; }
+        label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 5px; }
+        input { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #333; background: #0d0f12; color: #fff; font-size: 0.95rem; }
+        input:focus { outline: none; border-color: #00d2ff; }
+        
+        /* Error List Styling */
+        .errorlist { color: #ff4d4d; list-style: none; font-size: 0.8rem; margin-top: 5px; text-align: left; }
+        .helptext { display: block; font-size: 0.75rem; color: #777; margin-top: 4px; line-height: 1.2; text-align: left; }
+        .helptext ul { list-style: circle; margin-left: 15px; }
+
+        button { width: 100%; padding: 12px; background: #00d2ff; border: none; border-radius: 5px; font-weight: bold; color: #0d0f12; cursor: pointer; margin-top: 15px; font-size: 1rem; transition: background 0.3s ease; }
+        button:hover { background: #00a8cc; }
+        a { color: #888; font-size: 0.85rem; text-decoration: none; display: block; margin-top: 20px; }
+        a:hover { color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Join J.A.R.V.I.S.</h2>
+        
+        <form method="POST">
+            {% csrf_token %}
+            
+            {% if form.non_field_errors %}
+                <ul class="errorlist">
+                    {% for error in form.non_field_errors %}
+                        <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+
+            {% for field in form %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <ul class="errorlist">
+                            {% for error in field.errors %}
+                                <li>{{ error }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                    {% if field.help_text %}
+                        <span class="helptext">{{ field.help_text|safe }}</span>
+                    {% endif %}
+                </div>
+            {% endfor %}
+
+            <button type="submit">Create Account</button>
+        </form>
+
+        <a href="{% url 'assistance:login' %}">Already have an account? Login</a>
+    </div>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Sensitive API Keys & Env Variables
+.env
+
+# Database
+*.sqlite3
+db.sqlite3
+
+# Python Virtual Environment
+venv/
+env/
+ENV/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+
+# IDE Settings
+.vscode/
+.idea/
+
+# Static / Media Files
+/static/
+/media/

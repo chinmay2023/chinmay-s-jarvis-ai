@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S. Core Interface</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, sans-serif; }
+        
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            background-color: #050811;
+            color: #00f0ff;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .stage-container {
+            width: 100%;
+            height: 100%;
+            display: grid;
+            place-items: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+            background-size: 30px 30px;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* Top Right Logout Form */
+        .logout-form {
+            position: absolute;
+            top: 25px;
+            right: 30px;
+            z-index: 10;
+        }
+
+        .logout-btn {
+            background: rgba(0, 240, 255, 0.05);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            color: #00f0ff;
+            padding: 8px 18px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .logout-btn:hover {
+            background: rgba(0, 240, 255, 0.2);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+            color: #ffffff;
+        }
+
+        .header-status {
+            position: absolute;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            letter-spacing: 2px;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            z-index: 2;
+            white-space: nowrap;
+        }
+
+        /* Blinking Cyan Status Dot */
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #00f0ff;
+            box-shadow: 0 0 10px #00f0ff;
+            animation: blinkGlow 1.5s infinite alternate ease-in-out;
+        }
+
+        @keyframes blinkGlow {
+            0% {
+                opacity: 0.3;
+                box-shadow: 0 0 2px #00f0ff;
+            }
+            100% {
+                opacity: 1;
+                box-shadow: 0 0 14px #00f0ff, 0 0 22px #00f0ff;
+            }
+        }
+
+        .core-wrapper {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 2;
+        }
+
+        .outer-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border: 2px dashed rgba(0, 240, 255, 0.3);
+            border-radius: 50%;
+            animation: rotateClockwise 20s linear infinite;
+        }
+
+        .inner-ring {
+            position: absolute;
+            width: 80%;
+            height: 80%;
+            border: 2px solid rgba(0, 240, 255, 0.15);
+            border-top: 2px solid #00f0ff;
+            border-bottom: 2px solid #00f0ff;
+            border-radius: 50%;
+            animation: rotateCounter 10s linear infinite;
+        }
+
+        .center-node {
+            width: 50%;
+            height: 50%;
+            border-radius: 50%;
+            background: radial-gradient(circle, #00f0ff 0%, #004466 70%, #050811 100%);
+            box-shadow: 0 0 30px rgba(0, 240, 255, 0.4);
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .core-wrapper.listening .center-node {
+            transform: scale(1.15);
+            box-shadow: 0 0 60px rgba(0, 240, 255, 0.8);
+            background: radial-gradient(circle, #00f0ff 0%, #0088cc 60%, #050811 100%);
+        }
+
+        .core-wrapper.speaking .center-node {
+            animation: pulseWave 1s infinite alternate ease-in-out;
+            box-shadow: 0 0 80px rgba(0, 240, 255, 0.9);
+        }
+
+        .core-wrapper.thinking .inner-ring {
+            animation: rotateCounter 2s linear infinite;
+            border-color: #00f0ff;
+        }
+
+        .subtitle-box {
+            position: absolute;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            max-width: 600px;
+            text-align: center;
+            font-size: 1.05rem;
+            color: #d1f7ff;
+            text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+            padding: 0 20px;
+            z-index: 2;
+            min-height: 50px;
+        }
+
+        @keyframes rotateClockwise { 100% { transform: rotate(360deg); } }
+        @keyframes rotateCounter { 100% { transform: rotate(-360deg); } }
+        @keyframes pulseWave {
+            0% { transform: scale(0.95); }
+            100% { transform: scale(1.12); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="stage-container">
+        <!-- Top Right Logout Form -->
+        <form action="{% url 'assistance:logout' %}" method="POST" class="logout-form">
+            {% csrf_token %}
+            <button type="submit" class="logout-btn">Logout</button>
+        </form>
+
+        <div class="header-status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Click anywhere once to enable Double-Clap activation</span>
+        </div>
+
+        <div class="core-wrapper" id="coreWrapper" onclick="toggleSession()">
+            <div class="outer-ring"></div>
+            <div class="inner-ring"></div>
+            <div class="center-node"></div>
+        </div>
+
+        <div class="subtitle-box" id="subtitleBox"></div>
+    </div>
+
+    <script>
+        const coreWrapper = document.getElementById('coreWrapper');
+        const statusText = document.getElementById('statusText');
+        const statusDot = document.getElementById('statusDot');
+        const subtitleBox = document.getElementById('subtitleBox');
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+        let sessionActive = false;
+        let isProcessingOrSpeaking = false;
+        let availableVoices = [];
+
+        let finalTranscript = '';
+        let speechTimeout;
+
+        // Global Utterance reference to prevent Garbage Collection cut-offs
+        let currentUtterance = null;
+
+        // Double-Clap Setup
+        let audioContext;
+        let analyser;
+        let micStream;
+        let lastClapTime = 0;
+        let clapCount = 0;
+
+        function populateVoices() {
+            availableVoices = window.speechSynthesis.getVoices();
+        }
+        populateVoices();
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = populateVoices;
+        }
+
+        async function initClapDetector() {
+            if (audioContext) {
+                if (audioContext.state === 'suspended') await audioContext.resume();
+                return;
+            }
+
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioContext.createMediaStreamSource(micStream);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                source.connect(analyser);
+
+                const dataArray = new Uint8Array(analyser.fftSize);
+
+                statusText.textContent = "Clap Detection Active | Double-Clap or Click Core";
+
+                function monitorAudio() {
+                    if (!sessionActive && !isProcessingOrSpeaking && audioContext && audioContext.state === 'running') {
+                        analyser.getByteTimeDomainData(dataArray);
+
+                        let maxPeak = 0;
+                        for (let i = 0; i < dataArray.length; i++) {
+                            const deviation = Math.abs(dataArray[i] - 128);
+                            if (deviation > maxPeak) maxPeak = deviation;
+                        }
+
+                        if (maxPeak > 45) {
+                            const now = Date.now();
+                            if (now - lastClapTime > 150) {
+                                lastClapTime = now;
+                                clapCount++;
+
+                                if (clapCount === 1) {
+                                    statusText.textContent = "Clap 1 Detected...";
+                                    setTimeout(() => {
+                                        if (clapCount === 1) {
+                                            clapCount = 0;
+                                            statusText.textContent = sessionActive ? "Waiting for speech..." : "Clap Detection Active | Double-Clap or Click Core";
+                                        }
+                                    }, 1200);
+                                } else if (clapCount >= 2) {
+                                    clapCount = 0;
+                                    statusText.textContent = "⚡ Double Clap Detected! Activating...";
+                                    if (!sessionActive) toggleSession();
+                                }
+                            }
+                        }
+                    }
+                    requestAnimationFrame(monitorAudio);
+                }
+                monitorAudio();
+            } catch (err) {
+                console.error("Mic access error:", err);
+                statusText.textContent = "Mic access blocked. Click Core to start.";
+            }
+        }
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+
+            recognition.onstart = () => {
+                if (!sessionActive) {
+                    try { recognition.stop(); } catch(e){}
+                    return;
+                }
+                coreWrapper.className = 'core-wrapper listening';
+                statusText.textContent = "Listening... (Take your time speaking)";
+            };
+
+            recognition.onresult = (event) => {
+                if (!sessionActive || isProcessingOrSpeaking) return;
+
+                let interim = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript + ' ';
+                    } else {
+                        interim += event.results[i][0].transcript;
+                    }
+                }
+
+                subtitleBox.textContent = `You: "${finalTranscript + interim}"`;
+
+                clearTimeout(speechTimeout);
+                speechTimeout = setTimeout(() => {
+                    if (!sessionActive) return;
+                    const completeSentence = (finalTranscript + interim).trim();
+                    if (completeSentence.length > 2) {
+                        sendToJarvis(completeSentence);
+                    }
+                }, 2000);
+            };
+
+            recognition.onerror = () => {
+                if (sessionActive && !isProcessingOrSpeaking) restartListeningWithDelay();
+            };
+
+            recognition.onend = () => {
+                if (sessionActive && !isProcessingOrSpeaking) restartListeningWithDelay();
+            };
+        }
+
+        function toggleSession() {
+            window.speechSynthesis.resume();
+
+            if (!sessionActive) {
+                sessionActive = true;
+                isProcessingOrSpeaking = true;
+                finalTranscript = '';
+                
+                initClapDetector();
+
+                const wakeGreeting = "Online and ready, sir.";
+                subtitleBox.textContent = `JARVIS: "${wakeGreeting}"`;
+                speakReply(wakeGreeting, false);
+            } else {
+                shutdownSession();
+            }
+        }
+
+        function shutdownSession() {
+            sessionActive = false;
+            isProcessingOrSpeaking = false;
+            clearTimeout(speechTimeout);
+
+            if (recognition) {
+                try { recognition.abort(); } catch (e) {}
+            }
+
+            window.speechSynthesis.cancel();
+            resetUI();
+            statusText.textContent = "Systems Offline. Double-Clap or Click Core to Activate.";
+        }
+
+        function startListening() {
+            if (!sessionActive || isProcessingOrSpeaking) return;
+            finalTranscript = '';
+            try {
+                recognition.start();
+            } catch (e) {
+                try { recognition.stop(); } catch (err) {}
+                setTimeout(() => { if (sessionActive && !isProcessingOrSpeaking) recognition.start(); }, 300);
+            }
+        }
+
+        function restartListeningWithDelay() {
+            if (!sessionActive || isProcessingOrSpeaking) return;
+            setTimeout(() => { startListening(); }, 800);
+        }
+
+        function resetUI() {
+            coreWrapper.className = 'core-wrapper';
+            statusText.textContent = sessionActive ? "Waiting for speech..." : "Systems Offline. Double-Clap or Click Core to Activate.";
+            
+            setTimeout(() => {
+                if (!isProcessingOrSpeaking && !sessionActive) subtitleBox.textContent = "";
+            }, 3000);
+        }
+
+        function sendToJarvis(message) {
+            if (!sessionActive) return;
+
+            isProcessingOrSpeaking = true;
+            clearTimeout(speechTimeout);
+
+            if (recognition) {
+                try { recognition.abort(); } catch (e) {}
+            }
+
+            coreWrapper.className = 'core-wrapper thinking';
+            statusText.textContent = "JARVIS Thinking...";
+
+            const formData = new FormData();
+            formData.append('message', message);
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            fetch("{% url 'assistance:jarvis_api' %}", {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.reply) {
+                    subtitleBox.textContent = `JARVIS: "${data.reply}"`;
+                    speakReply(data.reply, data.shutdown || false);
+                } else {
+                    isProcessingOrSpeaking = false;
+                    restartListeningWithDelay();
+                }
+            })
+            .catch(err => {
+                console.error('API Error:', err);
+                isProcessingOrSpeaking = false;
+                if (sessionActive) restartListeningWithDelay();
+            });
+        }
+
+        function speakReply(text, isShutdown = false) {
+            const synth = window.speechSynthesis;
+            synth.cancel();
+
+            const cleanText = text.replace(/[*_~#`]/g, '').trim();
+
+            currentUtterance = new SpeechSynthesisUtterance(cleanText);
+
+            if (availableVoices.length === 0) availableVoices = synth.getVoices();
+
+            const jarvisVoice = availableVoices.find(v => 
+                v.lang.includes('en-GB') || 
+                v.name.includes('David') || 
+                v.name.includes('George') || 
+                v.name.includes('Natural')
+            ) || availableVoices[0];
+
+            if (jarvisVoice) currentUtterance.voice = jarvisVoice;
+
+            currentUtterance.rate = 1.0;
+            currentUtterance.pitch = 0.95;
+
+            currentUtterance.onstart = () => {
+                coreWrapper.className = 'core-wrapper speaking';
+                statusText.textContent = isShutdown ? "JARVIS Shutting Down..." : "JARVIS Transmitting...";
+            };
+
+            currentUtterance.onend = () => {
+                currentUtterance = null;
+                if (isShutdown) {
+                    shutdownSession();
+                } else {
+                    setTimeout(() => {
+                        isProcessingOrSpeaking = false;
+                        if (sessionActive) {
+                            resetUI();
+                            startListening();
+                        } else {
+                            resetUI();
+                        }
+                    }, 800);
+                }
+            };
+
+            currentUtterance.onerror = (e) => {
+                console.error("Speech Synthesis Error:", e);
+                currentUtterance = null;
+                if (isShutdown) {
+                    shutdownSession();
+                } else {
+                    isProcessingOrSpeaking = false;
+                    if (sessionActive) restartListeningWithDelay();
+                }
+            };
+
+            synth.resume();
+            synth.speak(currentUtterance);
+        }
+
+        window.addEventListener('click', () => {
+            initClapDetector();
+        }, { once: true });
+    </script>
+</body>
+</html>

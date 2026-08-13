@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - JARVIS AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #0d0f12; color: #fff; height: 100vh; display: flex; justify-content: center; align-items: center; }
+        .card { background: #1a1d24; padding: 40px; border-radius: 10px; width: 350px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        h2 { color: #00d2ff; margin-bottom: 25px; letter-spacing: 1px; }
+        p { margin-bottom: 15px; text-align: left; }
+        label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 5px; }
+        input { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #333; background: #0d0f12; color: #fff; font-size: 0.95rem; }
+        input:focus { outline: none; border-color: #00d2ff; }
+        button { width: 100%; padding: 12px; background: #00d2ff; border: none; border-radius: 5px; font-weight: bold; color: #0d0f12; cursor: pointer; margin-top: 15px; font-size: 1rem; }
+        button:hover { background: #00a8cc; }
+        a { color: #888; font-size: 0.85rem; text-decoration: none; display: block; margin-top: 20px; }
+        a:hover { color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Access J.A.R.V.I.S.</h2>
+        <form method="POST">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit">Login</button>
+        </form>
+        <a href="{% url 'assistance:register' %}">Need an account? Register</a>
+    </div>
+</body>
+</html>
