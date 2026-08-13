@@ -14,8 +14,43 @@ client = OpenAI(
 )
 
 
+def detect_salutation(username):
+    """Uses Groq Llama to dynamically detect if a name/username is male or female."""
+    clean_name = username.lower().strip()
+
+    female_terms = ["girl", "woman", "female", "lady", "miss", "mrs", "ms"]
+    if any(term in clean_name for term in female_terms):
+        return "maam"
+
+    try:
+        prompt = (
+            f"Determine if the username/name '{username}' is typically Male or Female. "
+            f"Respond with ONLY 'sir' for male or 'maam' for female. Do not include any punctuation."
+        )
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=5
+        )
+
+        result = response.choices[0].message.content.strip().lower()
+        if "maam" in result or "female" in result or "ma'am" in result:
+            return "maam"
+        return "sir"
+    except Exception as e:
+        print(f"⚠️ Salutation Detection Error: {e}")
+        return "sir"
+
+
 def get_live_web_context(query):
-    """Fetches real-time web search context for up-to-date knowledge."""
+    """Fetches real-time web search context ONLY for time/fact-sensitive queries."""
+    search_triggers = ["today", "news", "weather", "score", "price", "who is", "latest", "time", "date", "search"]
+    
+    if not any(trigger in query.lower() for trigger in search_triggers):
+        return ""
+
     try:
         results = list(DDGS().text(query, max_results=2))
         if results:
@@ -39,7 +74,9 @@ def register_view(request):
 
 @login_required(login_url='assistance:login')
 def chat_view(request):
-    return render(request, 'assistance/chat.html')
+    # Dynamically detects gender for page load & initial wake greeting
+    salutation = detect_salutation(request.user.username)
+    return render(request, 'assistance/chat.html', {'salutation': salutation})
 
 
 @login_required(login_url='assistance:login')
@@ -51,55 +88,61 @@ def jarvis_api(request):
         if not user_message:
             return JsonResponse({'error': 'No audio input received'}, status=400)
 
+        salutation = detect_salutation(user_name)
         cmd = user_message.lower().strip()
 
-        # Shutdown / Goodbye Detection
+        # Instant voice override if user explicitly asks in chat
+        if "i am a girl" in cmd or "i am female" in cmd or "call me ma'am" in cmd or "call me mam" in cmd:
+            salutation = "ma'am"
+        elif "i am a boy" in cmd or "i am male" in cmd or "call me sir" in cmd:
+            salutation = "sir"
+
+        # Save User Message
+        ChatMessage.objects.create(user=request.user, role='user', content=user_message)
+
+        # Context Memory
+        history = ChatMessage.objects.filter(user=request.user).order_by('-created_at')[:4]
+        history_messages = [{"role": msg.role, "content": msg.content} for msg in reversed(history)]
+
+        # Fast Shutdown / Goodbye
         shutdown_keywords = ["goodbye", "good bye", "bye", "shutdown", "shut down", "go to sleep", "sleep"]
         if any(word in cmd for word in shutdown_keywords):
-            reply = "Shutting down systems. Have a good day, sir."
-            ChatMessage.objects.create(user=request.user, role='user', content=user_message)
+            reply = f"Shutting down systems. Have a good day, {salutation}."
             ChatMessage.objects.create(user=request.user, role='assistant', content=reply)
             return JsonResponse({'reply': reply, 'shutdown': True})
 
-        # Save User Message to Database
-        ChatMessage.objects.create(user=request.user, role='user', content=user_message)
-
-        # Retrieve Conversation Context Memory (Last 8 Exchanges)
-        history = ChatMessage.objects.filter(user=request.user).order_by('-created_at')[:8]
-        history_messages = [{"role": msg.role, "content": msg.content} for msg in reversed(history)]
-
-        # Fetch Live Search Context for Up-To-Date Knowledge
+        # Conditional Web Search
         live_context = get_live_web_context(user_message)
-        live_info_prompt = f"\n[Live Web Context for current facts]: {live_context}" if live_context else ""
+        live_info_prompt = f"\n[Live Context]: {live_context}" if live_context else ""
 
-        # Check if the logged-in user is developer Chinmay (case-insensitive check)
+        # Creator check
         is_creator_logged_in = user_name.lower().startswith("chinmay")
 
-        # Creator instruction triggered ONLY when explicitly asked about identity/creator
         if is_creator_logged_in:
             creator_instruction = (
                 f"ONLY IF explicitly asked 'who created you', 'who built you', or 'who developed you', state: "
                 f"'My original concept stems from Tony Stark, but this system and platform were developed by you, Chinmay Pendke.' "
-                f"For all other questions (technical, general advice, etc.), answer directly without mentioning your creator or origin."
+                f"For all other questions, answer directly without mentioning your creator or origin."
             )
         else:
             creator_instruction = (
                 f"ONLY IF explicitly asked 'who created you', 'who built you', or 'who developed you', state: "
                 f"'My original concept stems from Tony Stark, but this system and platform were developed by Chinmay Pendke.' "
-                f"For all other questions (technical, general advice, etc.), answer directly without mentioning your creator or origin."
+                f"For all other questions, answer directly without mentioning your creator or origin."
             )
 
-        # Dynamic System Prompt locked strictly to English
+        other_salutation = "sir" if salutation == "ma'am" else "ma'am"
+
         system_instruction = {
             "role": "system",
             "content": (
                 f"You are J.A.R.V.I.S., Tony Stark's highly intelligent AI assistant. "
-                f"Address the user respectfully as 'sir'. "
-                f"ALWAYS speak and respond strictly in clear English. "
-                f"Only mention the logged-in username ({user_name}) if explicitly asked 'Who am I?' or 'What is my username?'. "
+                f"Address the user strictly as '{salutation}'. NEVER address them as '{other_salutation}'. "
+                f"ALWAYS speak strictly in clear English. "
+                f"If the user asks 'Who am I?', 'What is my name?', or 'Do you know my name?', answer directly using their name: 'Your name is {user_name}, {salutation}.' Do not use the word 'username'. "
                 f"{creator_instruction} "
                 f"{live_info_prompt} "
-                f"Keep all answers natural, spoken-friendly, concise (1 to 2 sentences max). "
+                f"Be conversational, natural, and punchy (1 to 2 sentences max). "
                 f"Never use markdown formatting like asterisks (*), emojis, or code blocks."
             )
         }
@@ -108,16 +151,16 @@ def jarvis_api(request):
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[system_instruction] + history_messages,
-                temperature=0.4
+                temperature=0.5,
+                max_tokens=200
             )
             reply = response.choices[0].message.content
 
-            # Save Assistant Reply to Database
             ChatMessage.objects.create(user=request.user, role='assistant', content=reply)
 
             return JsonResponse({'reply': reply})
         except Exception as e:
             print(f"❌ Groq API Error: {str(e)}")
-            return JsonResponse({'reply': 'My neural link experienced a slight glitch, sir. Please try speaking again.'})
+            return JsonResponse({'reply': f'My neural link experienced a slight glitch, {salutation}. Please try speaking again.'})
 
     return JsonResponse({'error': 'Invalid request method'}, status=405)

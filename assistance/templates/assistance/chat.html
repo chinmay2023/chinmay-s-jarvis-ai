@@ -38,33 +38,7 @@
             pointer-events: none;
         }
 
-        /* Top Right Logout Form */
-        .logout-form {
-            position: absolute;
-            top: 25px;
-            right: 30px;
-            z-index: 10;
-        }
-
-        .logout-btn {
-            background: rgba(0, 240, 255, 0.05);
-            border: 1px solid rgba(0, 240, 255, 0.3);
-            color: #00f0ff;
-            padding: 8px 18px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .logout-btn:hover {
-            background: rgba(0, 240, 255, 0.2);
-            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
-            color: #ffffff;
-        }
-
+        /* Top Centered Header Status */
         .header-status {
             position: absolute;
             top: 30px;
@@ -88,19 +62,43 @@
             background-color: #00f0ff;
             box-shadow: 0 0 10px #00f0ff;
             animation: blinkGlow 1.5s infinite alternate ease-in-out;
+            flex-shrink: 0;
         }
 
         @keyframes blinkGlow {
-            0% {
-                opacity: 0.3;
-                box-shadow: 0 0 2px #00f0ff;
-            }
-            100% {
-                opacity: 1;
-                box-shadow: 0 0 14px #00f0ff, 0 0 22px #00f0ff;
-            }
+            0% { opacity: 0.3; box-shadow: 0 0 2px #00f0ff; }
+            100% { opacity: 1; box-shadow: 0 0 14px #00f0ff, 0 0 22px #00f0ff; }
         }
 
+        /* Top Right Logout Button */
+        .logout-form {
+            position: absolute;
+            top: 25px;
+            right: 30px;
+            z-index: 10;
+        }
+
+        .logout-btn {
+            background: rgba(0, 240, 255, 0.05);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            color: #00f0ff;
+            padding: 8px 18px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .logout-btn:hover {
+            background: rgba(0, 240, 255, 0.2);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+            color: #ffffff;
+        }
+
+        /* Central HUD Node */
         .core-wrapper {
             position: relative;
             width: 280px;
@@ -160,11 +158,13 @@
             border-color: #00f0ff;
         }
 
+        /* Subtitle Box */
         .subtitle-box {
             position: absolute;
             bottom: 60px;
             left: 50%;
             transform: translateX(-50%);
+            width: 90%;
             max-width: 600px;
             text-align: center;
             font-size: 1.05rem;
@@ -181,28 +181,72 @@
             0% { transform: scale(0.95); }
             100% { transform: scale(1.12); }
         }
+
+        /* Responsive Mobile Breakpoints */
+        @media (max-width: 600px) {
+            .header-status {
+                top: 18px;
+                left: 15px;
+                transform: none;
+                font-size: 0.62rem;
+                letter-spacing: 0.8px;
+                max-width: calc(100vw - 110px);
+                overflow: hidden;
+            }
+
+            #statusText {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                display: block;
+            }
+
+            .logout-form {
+                top: 12px;
+                right: 12px;
+            }
+
+            .logout-btn {
+                padding: 5px 10px;
+                font-size: 0.62rem;
+                letter-spacing: 0.8px;
+            }
+
+            .core-wrapper {
+                width: 200px;
+                height: 200px;
+            }
+
+            .subtitle-box {
+                bottom: 30px;
+                font-size: 0.88rem;
+            }
+        }
     </style>
 </head>
 <body>
 
     <div class="stage-container">
-        <!-- Top Right Logout Form -->
-        <form action="{% url 'assistance:logout' %}" method="POST" class="logout-form">
-            {% csrf_token %}
-            <button type="submit" class="logout-btn">Logout</button>
-        </form>
-
+        <!-- Centered Status Header -->
         <div class="header-status">
             <div class="status-dot" id="statusDot"></div>
             <span id="statusText">Click anywhere once to enable Double-Clap activation</span>
         </div>
 
+        <!-- Top Right Logout Button -->
+        <form action="{% url 'assistance:logout' %}" method="POST" class="logout-form">
+            {% csrf_token %}
+            <button type="submit" class="logout-btn">Logout</button>
+        </form>
+
+        <!-- Central Core -->
         <div class="core-wrapper" id="coreWrapper" onclick="toggleSession()">
             <div class="outer-ring"></div>
             <div class="inner-ring"></div>
             <div class="center-node"></div>
         </div>
 
+        <!-- Subtitles -->
         <div class="subtitle-box" id="subtitleBox"></div>
     </div>
 
@@ -221,7 +265,7 @@
         let finalTranscript = '';
         let speechTimeout;
 
-        // Global Utterance reference to prevent Garbage Collection cut-offs
+        // Global Utterance reference
         let currentUtterance = null;
 
         // Double-Clap Setup
@@ -230,6 +274,13 @@
         let micStream;
         let lastClapTime = 0;
         let clapCount = 0;
+
+        // Helper to decode HTML entities like &#x27; to plain characters
+        function decodeHTML(html) {
+            const txt = document.createElement('textarea');
+            txt.innerHTML = html;
+            return txt.value;
+        }
 
         function populateVoices() {
             availableVoices = window.speechSynthesis.getVoices();
@@ -327,13 +378,14 @@
                 subtitleBox.textContent = `You: "${finalTranscript + interim}"`;
 
                 clearTimeout(speechTimeout);
+                // Set to 1800ms (1.8s) so JARVIS waits comfortably for full thoughts/sentences
                 speechTimeout = setTimeout(() => {
                     if (!sessionActive) return;
                     const completeSentence = (finalTranscript + interim).trim();
-                    if (completeSentence.length > 2) {
+                    if (completeSentence.length > 3) {
                         sendToJarvis(completeSentence);
                     }
-                }, 2000);
+                }, 1800);
             };
 
             recognition.onerror = () => {
@@ -355,7 +407,11 @@
                 
                 initClapDetector();
 
-                const wakeGreeting = "Online and ready, sir.";
+                // Decodes HTML entities so "ma&#x27;am" becomes "ma'am"
+                const rawSalutation = "{{ salutation|escapejs }}";
+                const salutation = decodeHTML(rawSalutation) || "sir";
+                const wakeGreeting = `Online and ready, ${salutation}.`;
+
                 subtitleBox.textContent = `JARVIS: "${wakeGreeting}"`;
                 speakReply(wakeGreeting, false);
             } else {
@@ -426,8 +482,9 @@
             .then(res => res.json())
             .then(data => {
                 if (data.reply) {
-                    subtitleBox.textContent = `JARVIS: "${data.reply}"`;
-                    speakReply(data.reply, data.shutdown || false);
+                    const cleanReply = decodeHTML(data.reply);
+                    subtitleBox.textContent = `JARVIS: "${cleanReply}"`;
+                    speakReply(cleanReply, data.shutdown || false);
                 } else {
                     isProcessingOrSpeaking = false;
                     restartListeningWithDelay();
@@ -444,7 +501,8 @@
             const synth = window.speechSynthesis;
             synth.cancel();
 
-            const cleanText = text.replace(/[*_~#`]/g, '').trim();
+            // Decodes HTML entities and strips markdown symbols
+            const cleanText = decodeHTML(text).replace(/[*_~#`]/g, '').trim();
 
             currentUtterance = new SpeechSynthesisUtterance(cleanText);
 
