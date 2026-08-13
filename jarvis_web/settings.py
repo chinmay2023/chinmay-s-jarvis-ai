@@ -5,13 +5,23 @@ from dotenv import load_dotenv
 # Define BASE_DIR (points to jarvis_web project root)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load .env sitting right in BASE_DIR (next to manage.py)
+# Load .env file
 load_dotenv(BASE_DIR / '.env')
 
 # Security Settings
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-!93n#f=^tvr8xc(fuz!xb((ay5#pe+7gvcy)-qzyuk11v%0o!2')
-DEBUG = os.getenv('DEBUG', 'False') == 'True'
-ALLOWED_HOSTS = ['*']  # Allows cloud domain access (Render, Railway, etc.)
+
+# DEBUG should default to False in production
+DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
+
+# ALLOWED_HOSTS for local and cloud platforms
+ALLOWED_HOSTS = ['*']
+
+# CSRF Trusted Origins (Essential for HTTPS domains on Render/Railway)
+RENDER_EXTERNAL_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME')
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+    CSRF_TRUSTED_ORIGINS = [f'https://{RENDER_EXTERNAL_HOSTNAME}']
 
 # Authentication Redirects
 LOGIN_URL = 'assistance:login'
@@ -30,7 +40,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  # Serves static files in production
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Serves static files efficiently in production
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -58,6 +68,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'jarvis_web.wsgi.application'
 
+# Database Configuration
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -77,7 +88,7 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static Files Configuration (Production Ready)
+# Static Files Configuration (Production Ready with WhiteNoise)
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
