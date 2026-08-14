@@ -232,7 +232,7 @@
     <div class="stage-container">
         <div class="header-status">
             <div class="status-dot" id="statusDot"></div>
-            <span id="statusText">Click anywhere once to enable Double-Clap activation</span>
+            <span id="statusText">Tap Core or Double-Clap to Activate</span>
         </div>
 
         <form action="{% url 'assistance:logout' %}" method="POST" class="logout-form">
@@ -256,18 +256,18 @@
         const subtitleBox = document.getElementById('subtitleBox');
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let recognition;
+        let recognition = null;
         let sessionActive = false;
         let isProcessingOrSpeaking = false;
 
         let finalTranscript = '';
-        let speechTimeout;
+        let speechTimeout = null;
         let currentAudio = null;
-        let currentUtterance = null;
 
-        let audioContext;
-        let analyser;
-        let micStream;
+        let audioContext = null;
+        let analyser = null;
+        let micStream = null;
+        let animationFrameId = null;
         let lastClapTime = 0;
         let clapCount = 0;
 
@@ -278,13 +278,13 @@
         }
 
         async function initClapDetector() {
-            if (audioContext) {
-                if (audioContext.state === 'suspended') await audioContext.resume();
-                return;
-            }
+            if (sessionActive) return; // Never run clap detection while JARVIS is actively listening
+            if (audioContext && audioContext.state === 'running' && micStream) return;
 
             try {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioContext.state === 'suspended') await audioContext.resume();
+
                 micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const source = audioContext.createMediaStreamSource(micStream);
                 analyser = audioContext.createAnalyser();
@@ -295,7 +295,7 @@
                 statusText.textContent = "Clap Detection Active | Double-Clap or Click Core";
 
                 function monitorAudio() {
-                    if (!sessionActive && !isProcessingOrSpeaking && audioContext && audioContext.state === 'running') {
+                    if (!sessionActive && !isProcessingOrSpeaking && analyser) {
                         analyser.getByteTimeDomainData(dataArray);
 
                         let maxPeak = 0;
@@ -325,21 +325,47 @@
                                 }
                             }
                         }
+                        animationFrameId = requestAnimationFrame(monitorAudio);
                     }
-                    requestAnimationFrame(monitorAudio);
                 }
                 monitorAudio();
             } catch (err) {
-                console.error("Mic access error:", err);
-                statusText.textContent = "Mic access blocked. Click Core to start.";
+                console.warn("Clap background listener disabled:", err);
+                statusText.textContent = "Tap Core to Activate";
             }
         }
 
-        if (SpeechRecognition) {
+        function stopClapDetector() {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            if (micStream) {
+                micStream.getTracks().forEach(track => track.stop());
+                micStream = null;
+            }
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close().catch(() => {});
+                audioContext = null;
+            }
+            analyser = null;
+        }
+
+        function setupSpeechRecognition() {
+            if (!SpeechRecognition) {
+                statusText.textContent = "Speech Recognition not supported on this browser.";
+                return;
+            }
+
+            if (recognition) {
+                try { recognition.abort(); } catch(e){}
+            }
+
             recognition = new SpeechRecognition();
             recognition.continuous = true;
             recognition.interimResults = true;
             recognition.lang = 'en-US';
+            recognition.maxAlternatives = 1;
 
             recognition.onstart = () => {
                 if (!sessionActive) {
@@ -366,15 +392,14 @@
                 }
 
                 const currentSpoken = (finalTranscript + interim).trim();
-                subtitleBox.textContent = `You: "${currentSpoken}"`;
+                if (currentSpoken.length > 0) {
+                    subtitleBox.textContent = `You: "${currentSpoken}"`;
+                }
 
                 clearTimeout(speechTimeout);
                 
-                if (currentSpoken.length > 2) {
-                    // If you're pausing mid-thought (interim), wait 1600ms.
-                    // If speech engine confirms sentence end (isFinal), trigger faster (1100ms).
+                if (currentSpoken.length > 1) {
                     const delay = hasFinal ? 1100 : 1600;
-
                     speechTimeout = setTimeout(() => {
                         if (!sessionActive || isProcessingOrSpeaking) return;
                         sendToJarvis(currentSpoken);
@@ -382,31 +407,39 @@
                 }
             };
 
-            recognition.onerror = () => {
-                if (sessionActive && !isProcessingOrSpeaking) restartListeningWithDelay();
+            recognition.onerror = (event) => {
+                console.warn("Speech Recognition notice:", event.error);
+                if (event.error === 'not-allowed') {
+                    statusText.textContent = "Mic permission denied. Please allow mic access.";
+                    sessionActive = false;
+                    resetUI();
+                } else if (sessionActive && !isProcessingOrSpeaking) {
+                    restartListeningWithDelay();
+                }
             };
 
             recognition.onend = () => {
-                if (sessionActive && !isProcessingOrSpeaking) restartListeningWithDelay();
+                if (sessionActive && !isProcessingOrSpeaking) {
+                    restartListeningWithDelay();
+                }
             };
         }
 
         function toggleSession() {
-            if (window.speechSynthesis) window.speechSynthesis.resume();
-
             if (!sessionActive) {
                 sessionActive = true;
                 isProcessingOrSpeaking = true;
                 finalTranscript = '';
                 
-                initClapDetector();
+                // Release audio stream from Clap detector so mobile Speech Recognition gets the microphone
+                stopClapDetector();
+                setupSpeechRecognition();
 
                 const rawSalutation = "{{ salutation|escapejs }}";
                 const salutation = decodeHTML(rawSalutation) || "sir";
                 const wakeGreeting = `Online and ready, ${salutation}.`;
 
                 subtitleBox.textContent = `JARVIS: "${wakeGreeting}"`;
-                
                 fetchWakeAudio(wakeGreeting);
             } else {
                 shutdownSession();
@@ -448,33 +481,40 @@
                 currentAudio.pause();
                 currentAudio.currentTime = 0;
             }
-            if (window.speechSynthesis) {
-                window.speechSynthesis.cancel();
-            }
 
             resetUI();
-            statusText.textContent = "Systems Offline. Double-Clap or Click Core to Activate.";
+            statusText.textContent = "Systems Offline. Tap Core to Activate.";
+            
+            // Re-enable clap detector in offline state after short delay
+            setTimeout(() => {
+                if (!sessionActive) initClapDetector();
+            }, 1000);
         }
 
         function startListening() {
             if (!sessionActive || isProcessingOrSpeaking) return;
             finalTranscript = '';
             try {
+                if (!recognition) setupSpeechRecognition();
                 recognition.start();
             } catch (e) {
                 try { recognition.stop(); } catch (err) {}
-                setTimeout(() => { if (sessionActive && !isProcessingOrSpeaking) recognition.start(); }, 300);
+                setTimeout(() => { 
+                    if (sessionActive && !isProcessingOrSpeaking) {
+                        try { recognition.start(); } catch(err2) {}
+                    }
+                }, 300);
             }
         }
 
         function restartListeningWithDelay() {
             if (!sessionActive || isProcessingOrSpeaking) return;
-            setTimeout(() => { startListening(); }, 800);
+            setTimeout(() => { startListening(); }, 600);
         }
 
         function resetUI() {
             coreWrapper.className = 'core-wrapper';
-            statusText.textContent = sessionActive ? "Waiting for speech..." : "Systems Offline. Double-Clap or Click Core to Activate.";
+            statusText.textContent = sessionActive ? "Waiting for speech..." : "Systems Offline. Tap Core to Activate.";
             
             setTimeout(() => {
                 if (!isProcessingOrSpeaking && !sessionActive) subtitleBox.textContent = "";
@@ -535,7 +575,7 @@
                 statusText.textContent = isShutdown ? "JARVIS Shutting Down..." : "JARVIS Transmitting...";
 
                 currentAudio.play().catch(e => {
-                    console.warn("Audio autoplay blocked or failed, falling back:", e);
+                    console.warn("Audio autoplay blocked or stream error:", e);
                     fallbackBrowserTTS(cleanText, isShutdown);
                 });
 
@@ -568,30 +608,34 @@
 
         function fallbackBrowserTTS(cleanText, isShutdown) {
             const synth = window.speechSynthesis;
-            synth.cancel();
+            if (!synth) {
+                isProcessingOrSpeaking = false;
+                if (sessionActive) restartListeningWithDelay();
+                return;
+            }
 
-            currentUtterance = new SpeechSynthesisUtterance(cleanText);
+            synth.cancel();
+            const utterance = new SpeechSynthesisUtterance(cleanText);
             const voices = synth.getVoices();
             const preferredMaleVoice = voices.find(v => 
                 v.lang.includes('en-US') && v.name.toLowerCase().includes('male')
             ) || voices.find(v => v.name.includes('David') || v.name.includes('George'));
 
             if (preferredMaleVoice) {
-                currentUtterance.voice = preferredMaleVoice;
-                currentUtterance.pitch = 0.85;
+                utterance.voice = preferredMaleVoice;
+                utterance.pitch = 0.85;
             } else {
-                currentUtterance.pitch = 0.75;
+                utterance.pitch = 0.75;
             }
 
-            currentUtterance.rate = 1.0;
+            utterance.rate = 1.0;
 
-            currentUtterance.onstart = () => {
+            utterance.onstart = () => {
                 coreWrapper.className = 'core-wrapper speaking';
                 statusText.textContent = isShutdown ? "JARVIS Shutting Down..." : "JARVIS Transmitting...";
             };
 
-            currentUtterance.onend = () => {
-                currentUtterance = null;
+            utterance.onend = () => {
                 if (isShutdown) {
                     shutdownSession();
                 } else {
@@ -607,8 +651,7 @@
                 }
             };
 
-            currentUtterance.onerror = () => {
-                currentUtterance = null;
+            utterance.onerror = () => {
                 if (isShutdown) {
                     shutdownSession();
                 } else {
@@ -618,7 +661,7 @@
             };
 
             synth.resume();
-            synth.speak(currentUtterance);
+            synth.speak(utterance);
         }
 
         function unlockMobileAudio() {
