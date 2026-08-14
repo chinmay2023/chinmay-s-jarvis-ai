@@ -260,7 +260,7 @@
         let sessionActive = false;
         let isProcessingOrSpeaking = false;
 
-        let finalTranscript = '';
+        let accumulatedTranscript = '';
         let speechTimeout = null;
         let currentAudio = null;
 
@@ -277,8 +277,9 @@
             return txt.value;
         }
 
+        // --- CLAP DETECTOR ---
         async function initClapDetector() {
-            if (sessionActive) return; // Never run clap detection while JARVIS is actively listening
+            if (sessionActive) return;
             if (audioContext && audioContext.state === 'running' && micStream) return;
 
             try {
@@ -315,7 +316,7 @@
                                     setTimeout(() => {
                                         if (clapCount === 1) {
                                             clapCount = 0;
-                                            statusText.textContent = sessionActive ? "Waiting for speech..." : "Clap Detection Active | Double-Clap or Click Core";
+                                            statusText.textContent = sessionActive ? "Listening..." : "Clap Detection Active | Double-Clap or Click Core";
                                         }
                                     }, 1200);
                                 } else if (clapCount >= 2) {
@@ -341,7 +342,10 @@
                 animationFrameId = null;
             }
             if (micStream) {
-                micStream.getTracks().forEach(track => track.stop());
+                micStream.getTracks().forEach(track => {
+                    track.stop();
+                    track.enabled = false;
+                });
                 micStream = null;
             }
             if (audioContext && audioContext.state !== 'closed') {
@@ -351,6 +355,7 @@
             analyser = null;
         }
 
+        // --- SPEECH RECOGNITION (MOBILE OPTIMIZED) ---
         function setupSpeechRecognition() {
             if (!SpeechRecognition) {
                 statusText.textContent = "Speech Recognition not supported on this browser.";
@@ -362,7 +367,7 @@
             }
 
             recognition = new SpeechRecognition();
-            recognition.continuous = true;
+            recognition.continuous = false; // Required for reliable Android/iOS recognition
             recognition.interimResults = true;
             recognition.lang = 'en-US';
             recognition.maxAlternatives = 1;
@@ -373,37 +378,36 @@
                     return;
                 }
                 coreWrapper.className = 'core-wrapper listening';
-                statusText.textContent = "Listening... (Take your time speaking)";
+                statusText.textContent = "Listening... (Speak to JARVIS)";
             };
 
             recognition.onresult = (event) => {
                 if (!sessionActive || isProcessingOrSpeaking) return;
 
                 let interim = '';
-                let hasFinal = false;
-
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const text = event.results[i][0].transcript;
                     if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript + ' ';
-                        hasFinal = true;
+                        accumulatedTranscript += text + ' ';
                     } else {
-                        interim += event.results[i][0].transcript;
+                        interim += text;
                     }
                 }
 
-                const currentSpoken = (finalTranscript + interim).trim();
-                if (currentSpoken.length > 0) {
-                    subtitleBox.textContent = `You: "${currentSpoken}"`;
+                const liveText = (accumulatedTranscript + interim).trim();
+                if (liveText.length > 0) {
+                    subtitleBox.textContent = `You: "${liveText}"`;
                 }
 
                 clearTimeout(speechTimeout);
-                
-                if (currentSpoken.length > 1) {
-                    const delay = hasFinal ? 1100 : 1600;
+                if (liveText.length > 1) {
                     speechTimeout = setTimeout(() => {
-                        if (!sessionActive || isProcessingOrSpeaking) return;
-                        sendToJarvis(currentSpoken);
-                    }, delay);
+                        if (sessionActive && !isProcessingOrSpeaking && accumulatedTranscript.trim().length > 1) {
+                            const query = accumulatedTranscript.trim();
+                            accumulatedTranscript = '';
+                            sendToJarvis(query);
+                        }
+                    }, 1200);
                 }
             };
 
@@ -420,18 +424,24 @@
 
             recognition.onend = () => {
                 if (sessionActive && !isProcessingOrSpeaking) {
-                    restartListeningWithDelay();
+                    const finalQuery = accumulatedTranscript.trim();
+                    if (finalQuery.length > 1) {
+                        accumulatedTranscript = '';
+                        sendToJarvis(finalQuery);
+                    } else {
+                        restartListeningWithDelay();
+                    }
                 }
             };
         }
 
+        // --- SESSION CONTROL ---
         function toggleSession() {
             if (!sessionActive) {
                 sessionActive = true;
                 isProcessingOrSpeaking = true;
-                finalTranscript = '';
+                accumulatedTranscript = '';
                 
-                // Release audio stream from Clap detector so mobile Speech Recognition gets the microphone
                 stopClapDetector();
                 setupSpeechRecognition();
 
@@ -471,6 +481,7 @@
         function shutdownSession() {
             sessionActive = false;
             isProcessingOrSpeaking = false;
+            accumulatedTranscript = '';
             clearTimeout(speechTimeout);
 
             if (recognition) {
@@ -485,7 +496,6 @@
             resetUI();
             statusText.textContent = "Systems Offline. Tap Core to Activate.";
             
-            // Re-enable clap detector in offline state after short delay
             setTimeout(() => {
                 if (!sessionActive) initClapDetector();
             }, 1000);
@@ -493,7 +503,7 @@
 
         function startListening() {
             if (!sessionActive || isProcessingOrSpeaking) return;
-            finalTranscript = '';
+            accumulatedTranscript = '';
             try {
                 if (!recognition) setupSpeechRecognition();
                 recognition.start();
@@ -503,18 +513,18 @@
                     if (sessionActive && !isProcessingOrSpeaking) {
                         try { recognition.start(); } catch(err2) {}
                     }
-                }, 300);
+                }, 250);
             }
         }
 
         function restartListeningWithDelay() {
             if (!sessionActive || isProcessingOrSpeaking) return;
-            setTimeout(() => { startListening(); }, 600);
+            setTimeout(() => { startListening(); }, 300);
         }
 
         function resetUI() {
             coreWrapper.className = 'core-wrapper';
-            statusText.textContent = sessionActive ? "Waiting for speech..." : "Systems Offline. Tap Core to Activate.";
+            statusText.textContent = sessionActive ? "Listening..." : "Systems Offline. Tap Core to Activate.";
             
             setTimeout(() => {
                 if (!isProcessingOrSpeaking && !sessionActive) subtitleBox.textContent = "";
@@ -575,8 +585,7 @@
                 statusText.textContent = isShutdown ? "JARVIS Shutting Down..." : "JARVIS Transmitting...";
 
                 currentAudio.play().catch(e => {
-                    console.warn("Audio autoplay blocked or stream error:", e);
-                    fallbackBrowserTTS(cleanText, isShutdown);
+                    console.warn("Audio playback issue:", e);
                 });
 
                 currentAudio.onended = () => {
@@ -592,81 +601,24 @@
                             } else {
                                 resetUI();
                             }
-                        }, 400);
+                        }, 300);
                     }
                 };
 
                 currentAudio.onerror = () => {
                     currentAudio = null;
-                    fallbackBrowserTTS(cleanText, isShutdown);
+                    isProcessingOrSpeaking = false;
+                    if (sessionActive) restartListeningWithDelay();
                 };
                 return;
             }
 
-            fallbackBrowserTTS(cleanText, isShutdown);
-        }
-
-        function fallbackBrowserTTS(cleanText, isShutdown) {
-            const synth = window.speechSynthesis;
-            if (!synth) {
-                isProcessingOrSpeaking = false;
-                if (sessionActive) restartListeningWithDelay();
-                return;
-            }
-
-            synth.cancel();
-            const utterance = new SpeechSynthesisUtterance(cleanText);
-            const voices = synth.getVoices();
-            const preferredMaleVoice = voices.find(v => 
-                v.lang.includes('en-US') && v.name.toLowerCase().includes('male')
-            ) || voices.find(v => v.name.includes('David') || v.name.includes('George'));
-
-            if (preferredMaleVoice) {
-                utterance.voice = preferredMaleVoice;
-                utterance.pitch = 0.85;
-            } else {
-                utterance.pitch = 0.75;
-            }
-
-            utterance.rate = 1.0;
-
-            utterance.onstart = () => {
-                coreWrapper.className = 'core-wrapper speaking';
-                statusText.textContent = isShutdown ? "JARVIS Shutting Down..." : "JARVIS Transmitting...";
-            };
-
-            utterance.onend = () => {
-                if (isShutdown) {
-                    shutdownSession();
-                } else {
-                    setTimeout(() => {
-                        isProcessingOrSpeaking = false;
-                        if (sessionActive) {
-                            resetUI();
-                            startListening();
-                        } else {
-                            resetUI();
-                        }
-                    }, 400);
-                }
-            };
-
-            utterance.onerror = () => {
-                if (isShutdown) {
-                    shutdownSession();
-                } else {
-                    isProcessingOrSpeaking = false;
-                    if (sessionActive) restartListeningWithDelay();
-                }
-            };
-
-            synth.resume();
-            synth.speak(utterance);
+            isProcessingOrSpeaking = false;
+            if (sessionActive) restartListeningWithDelay();
         }
 
         function unlockMobileAudio() {
             initClapDetector();
-            if (window.speechSynthesis) window.speechSynthesis.resume();
         }
 
         window.addEventListener('click', unlockMobileAudio, { once: true });
