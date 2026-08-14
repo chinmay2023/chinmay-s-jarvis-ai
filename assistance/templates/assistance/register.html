@@ -2,67 +2,175 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - JARVIS AI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Register - J.A.R.V.I.S.</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #0d0f12; color: #fff; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
-        .card { background: #1a1d24; padding: 40px; border-radius: 10px; width: 420px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-        h2 { color: #00d2ff; margin-bottom: 20px; letter-spacing: 1px; }
-        
-        /* Form Field Styling */
-        .form-group { margin-bottom: 15px; text-align: left; }
-        label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 5px; }
-        input { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #333; background: #0d0f12; color: #fff; font-size: 0.95rem; }
-        input:focus { outline: none; border-color: #00d2ff; }
-        
-        /* Error List Styling */
-        .errorlist { color: #ff4d4d; list-style: none; font-size: 0.8rem; margin-top: 5px; text-align: left; }
-        .helptext { display: block; font-size: 0.75rem; color: #777; margin-top: 4px; line-height: 1.2; text-align: left; }
-        .helptext ul { list-style: circle; margin-left: 15px; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, sans-serif; }
 
-        button { width: 100%; padding: 12px; background: #00d2ff; border: none; border-radius: 5px; font-weight: bold; color: #0d0f12; cursor: pointer; margin-top: 15px; font-size: 1rem; transition: background 0.3s ease; }
-        button:hover { background: #00a8cc; }
-        a { color: #888; font-size: 0.85rem; text-decoration: none; display: block; margin-top: 20px; }
-        a:hover { color: #fff; }
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            background-color: #050811;
+            color: #00f0ff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden; /* Locks page scroll entirely */
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+            background-size: 30px 30px;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .card {
+            background: rgba(13, 20, 36, 0.85);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 16px;
+            box-shadow: 0 0 30px rgba(0, 240, 255, 0.15);
+            width: 88%;
+            max-width: 380px;
+            padding: 20px 18px;
+            z-index: 1;
+            backdrop-filter: blur(10px);
+            text-align: center;
+            max-height: 92vh;
+            overflow-y: auto; /* Allows smooth inner scroll if screen is extremely short */
+            -ms-overflow-style: none; /* Hide scrollbars */
+            scrollbar-width: none;
+        }
+
+        .card::-webkit-scrollbar {
+            display: none; /* Hide scrollbar Chrome/Safari/Edge */
+        }
+
+        .card h2 {
+            font-size: 1.2rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #00f0ff;
+            margin-bottom: 12px;
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            text-align: left;
+        }
+
+        label {
+            font-size: 0.72rem;
+            color: #88c0d0;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 2px;
+            display: block;
+        }
+
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 8px 10px;
+            background: rgba(5, 8, 17, 0.8);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 0.85rem;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        input[type="text"]:focus, input[type="password"]:focus {
+            border-color: #00f0ff;
+            box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
+        }
+
+        .helptext, .helptext ul {
+            font-size: 0.63rem;
+            color: #6c8cae;
+            margin-top: 2px;
+            line-height: 1.2;
+            list-style-type: none;
+            padding-left: 0;
+        }
+
+        .errorlist {
+            color: #ff4d4d;
+            font-size: 0.7rem;
+            list-style: none;
+            margin-bottom: 2px;
+        }
+
+        .btn-submit {
+            margin-top: 6px;
+            width: 100%;
+            padding: 10px;
+            background: #00f0ff;
+            border: none;
+            border-radius: 8px;
+            color: #050811;
+            font-size: 0.85rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+        }
+
+        .btn-submit:hover {
+            background: #ffffff;
+            box-shadow: 0 0 25px rgba(0, 240, 255, 0.8);
+        }
+
+        .auth-link {
+            display: inline-block;
+            margin-top: 12px;
+            color: #88c0d0;
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .auth-link:hover {
+            color: #00f0ff;
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
+
     <div class="card">
         <h2>Join J.A.R.V.I.S.</h2>
         
         <form method="POST">
             {% csrf_token %}
-            
-            {% if form.non_field_errors %}
-                <ul class="errorlist">
-                    {% for error in form.non_field_errors %}
-                        <li>{{ error }}</li>
-                    {% endfor %}
-                </ul>
-            {% endif %}
-
             {% for field in form %}
-                <div class="form-group">
+                <div>
                     <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field.errors }}
                     {{ field }}
-                    {% if field.errors %}
-                        <ul class="errorlist">
-                            {% for error in field.errors %}
-                                <li>{{ error }}</li>
-                            {% endfor %}
-                        </ul>
-                    {% endif %}
                     {% if field.help_text %}
-                        <span class="helptext">{{ field.help_text|safe }}</span>
+                        <div class="helptext">{{ field.help_text|safe }}</div>
                     {% endif %}
                 </div>
             {% endfor %}
 
-            <button type="submit">Create Account</button>
+            <button type="submit" class="btn-submit">Create Account</button>
         </form>
 
-        <a href="{% url 'assistance:login' %}">Already have an account? Login</a>
+        <a href="{% url 'assistance:login' %}" class="auth-link">Already have an account? Login</a>
     </div>
+
 </body>
 </html>
