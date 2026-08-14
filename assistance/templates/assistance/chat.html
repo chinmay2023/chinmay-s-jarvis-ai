@@ -25,7 +25,7 @@
             align-items: center;
             position: relative;
             z-index: 1;
-            padding: 20px 0;
+            padding: 20px 15px;
         }
 
         body::before {
@@ -166,7 +166,7 @@
         /* Subtitle Box */
         .subtitle-box {
             position: absolute;
-            bottom: 80px;
+            bottom: 75px;
             left: 50%;
             transform: translateX(-50%);
             width: 90%;
@@ -187,13 +187,13 @@
             100% { transform: scale(1.12); }
         }
 
-        /* Mobile Adjustments */
-        @media (max-width: 600px) {
+        /* Responsive Mobile Layout Adjustments */
+        @media (max-width: 768px) {
             .header-status {
                 top: 18px;
                 left: 15px;
                 transform: none;
-                font-size: 0.6rem;
+                font-size: 0.65rem;
                 letter-spacing: 0.5px;
                 max-width: calc(100vw - 110px);
             }
@@ -216,12 +216,12 @@
             }
 
             .core-wrapper {
-                width: 210px;
-                height: 210px;
+                width: 200px;
+                height: 200px;
             }
 
             .subtitle-box {
-                bottom: 85px;
+                bottom: 80px;
                 font-size: 0.85rem;
             }
         }
@@ -232,7 +232,7 @@
     <div class="stage-container">
         <div class="header-status">
             <div class="status-dot" id="statusDot"></div>
-            <span id="statusText">Tap Core or Double-Clap to Activate</span>
+            <span id="statusText">Initializing...</span>
         </div>
 
         <form action="{% url 'assistance:logout' %}" method="POST" class="logout-form">
@@ -264,10 +264,12 @@
         let speechTimeout = null;
         let currentAudio = null;
 
+        // Device Check
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
         let audioContext = null;
         let analyser = null;
         let micStream = null;
-        let animationFrameId = null;
         let lastClapTime = 0;
         let clapCount = 0;
 
@@ -277,15 +279,22 @@
             return txt.value;
         }
 
-        // --- CLAP DETECTOR ---
+        // Set initial display text
+        statusText.textContent = isMobile 
+            ? "Tap Core to Activate JARVIS" 
+            : "Double-Clap or Click Core to Activate";
+
+        // --- 1. CLAP DETECTOR (Desktop / Laptop Only) ---
         async function initClapDetector() {
-            if (sessionActive) return;
-            if (audioContext && audioContext.state === 'running' && micStream) return;
+            if (isMobile || sessionActive) return; // Completely disabled on mobile to prevent hardware locks
+
+            if (audioContext) {
+                if (audioContext.state === 'suspended') await audioContext.resume();
+                return;
+            }
 
             try {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioContext.state === 'suspended') await audioContext.resume();
-
                 micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const source = audioContext.createMediaStreamSource(micStream);
                 analyser = audioContext.createAnalyser();
@@ -296,7 +305,7 @@
                 statusText.textContent = "Clap Detection Active | Double-Clap or Click Core";
 
                 function monitorAudio() {
-                    if (!sessionActive && !isProcessingOrSpeaking && analyser) {
+                    if (!sessionActive && !isProcessingOrSpeaking && audioContext && audioContext.state === 'running') {
                         analyser.getByteTimeDomainData(dataArray);
 
                         let maxPeak = 0;
@@ -316,7 +325,7 @@
                                     setTimeout(() => {
                                         if (clapCount === 1) {
                                             clapCount = 0;
-                                            statusText.textContent = sessionActive ? "Listening..." : "Clap Detection Active | Double-Clap or Click Core";
+                                            statusText.textContent = sessionActive ? "Listening..." : "Double-Clap or Click Core to Activate";
                                         }
                                     }, 1200);
                                 } else if (clapCount >= 2) {
@@ -326,39 +335,20 @@
                                 }
                             }
                         }
-                        animationFrameId = requestAnimationFrame(monitorAudio);
                     }
+                    requestAnimationFrame(monitorAudio);
                 }
                 monitorAudio();
             } catch (err) {
-                console.warn("Clap background listener disabled:", err);
-                statusText.textContent = "Tap Core to Activate";
+                console.warn("Clap detector notice:", err);
+                statusText.textContent = "Click Core to Activate";
             }
         }
 
-        function stopClapDetector() {
-            if (animationFrameId) {
-                cancelAnimationFrame(animationFrameId);
-                animationFrameId = null;
-            }
-            if (micStream) {
-                micStream.getTracks().forEach(track => {
-                    track.stop();
-                    track.enabled = false;
-                });
-                micStream = null;
-            }
-            if (audioContext && audioContext.state !== 'closed') {
-                audioContext.close().catch(() => {});
-                audioContext = null;
-            }
-            analyser = null;
-        }
-
-        // --- SPEECH RECOGNITION (MOBILE OPTIMIZED) ---
+        // --- 2. HYBRID SPEECH RECOGNITION ---
         function setupSpeechRecognition() {
             if (!SpeechRecognition) {
-                statusText.textContent = "Speech Recognition not supported on this browser.";
+                statusText.textContent = "Speech Recognition not supported in this browser.";
                 return;
             }
 
@@ -367,7 +357,8 @@
             }
 
             recognition = new SpeechRecognition();
-            recognition.continuous = false; // Required for reliable Android/iOS recognition
+            // Continuous on laptop for hands-free chat; phrase-looping on mobile for stability
+            recognition.continuous = !isMobile;
             recognition.interimResults = true;
             recognition.lang = 'en-US';
             recognition.maxAlternatives = 1;
@@ -385,10 +376,13 @@
                 if (!sessionActive || isProcessingOrSpeaking) return;
 
                 let interim = '';
+                let hasFinal = false;
+
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const text = event.results[i][0].transcript;
                     if (event.results[i].isFinal) {
                         accumulatedTranscript += text + ' ';
+                        hasFinal = true;
                     } else {
                         interim += text;
                     }
@@ -401,23 +395,24 @@
 
                 clearTimeout(speechTimeout);
                 if (liveText.length > 1) {
+                    const waitTime = hasFinal ? 1000 : 1600;
                     speechTimeout = setTimeout(() => {
                         if (sessionActive && !isProcessingOrSpeaking && accumulatedTranscript.trim().length > 1) {
                             const query = accumulatedTranscript.trim();
                             accumulatedTranscript = '';
                             sendToJarvis(query);
                         }
-                    }, 1200);
+                    }, waitTime);
                 }
             };
 
             recognition.onerror = (event) => {
                 console.warn("Speech Recognition notice:", event.error);
                 if (event.error === 'not-allowed') {
-                    statusText.textContent = "Mic permission denied. Please allow mic access.";
+                    statusText.textContent = "Mic permission denied. Please allow mic in browser.";
                     sessionActive = false;
                     resetUI();
-                } else if (sessionActive && !isProcessingOrSpeaking) {
+                } else if (event.error !== 'no-speech' && sessionActive && !isProcessingOrSpeaking) {
                     restartListeningWithDelay();
                 }
             };
@@ -435,14 +430,13 @@
             };
         }
 
-        // --- SESSION CONTROL ---
+        // --- 3. SESSION MANAGEMENT ---
         function toggleSession() {
             if (!sessionActive) {
                 sessionActive = true;
                 isProcessingOrSpeaking = true;
                 accumulatedTranscript = '';
-                
-                stopClapDetector();
+
                 setupSpeechRecognition();
 
                 const rawSalutation = "{{ salutation|escapejs }}";
@@ -494,11 +488,9 @@
             }
 
             resetUI();
-            statusText.textContent = "Systems Offline. Tap Core to Activate.";
-            
-            setTimeout(() => {
-                if (!sessionActive) initClapDetector();
-            }, 1000);
+            statusText.textContent = isMobile 
+                ? "Systems Offline. Tap Core to Activate." 
+                : "Systems Offline. Double-Clap or Click Core to Activate.";
         }
 
         function startListening() {
@@ -513,18 +505,18 @@
                     if (sessionActive && !isProcessingOrSpeaking) {
                         try { recognition.start(); } catch(err2) {}
                     }
-                }, 250);
+                }, 200);
             }
         }
 
         function restartListeningWithDelay() {
             if (!sessionActive || isProcessingOrSpeaking) return;
-            setTimeout(() => { startListening(); }, 300);
+            setTimeout(() => { startListening(); }, 250);
         }
 
         function resetUI() {
             coreWrapper.className = 'core-wrapper';
-            statusText.textContent = sessionActive ? "Listening..." : "Systems Offline. Tap Core to Activate.";
+            statusText.textContent = sessionActive ? "Listening..." : (isMobile ? "Systems Offline. Tap Core to Activate." : "Systems Offline. Double-Clap or Click Core to Activate.");
             
             setTimeout(() => {
                 if (!isProcessingOrSpeaking && !sessionActive) subtitleBox.textContent = "";
@@ -601,7 +593,7 @@
                             } else {
                                 resetUI();
                             }
-                        }, 300);
+                        }, 250);
                     }
                 };
 
@@ -617,12 +609,10 @@
             if (sessionActive) restartListeningWithDelay();
         }
 
-        function unlockMobileAudio() {
-            initClapDetector();
-        }
-
-        window.addEventListener('click', unlockMobileAudio, { once: true });
-        window.addEventListener('touchstart', unlockMobileAudio, { once: true });
+        // On laptop, initiate clap listener on first interaction
+        window.addEventListener('click', () => {
+            if (!isMobile) initClapDetector();
+        }, { once: true });
     </script>
 </body>
 </html>
