@@ -163,7 +163,7 @@
             border-color: #00f0ff;
         }
 
-        /* Subtitle Box fixed for Mobile Layouts */
+        /* Subtitle Box */
         .subtitle-box {
             position: absolute;
             bottom: 80px;
@@ -259,10 +259,10 @@
         let recognition;
         let sessionActive = false;
         let isProcessingOrSpeaking = false;
-        let availableVoices = [];
 
         let finalTranscript = '';
         let speechTimeout;
+        let currentAudio = null;
         let currentUtterance = null;
 
         let audioContext;
@@ -275,14 +275,6 @@
             const txt = document.createElement('textarea');
             txt.innerHTML = html;
             return txt.value;
-        }
-
-        function populateVoices() {
-            availableVoices = window.speechSynthesis.getVoices();
-        }
-        populateVoices();
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = populateVoices;
         }
 
         async function initClapDetector() {
@@ -347,6 +339,7 @@
             recognition = new SpeechRecognition();
             recognition.continuous = true;
             recognition.interimResults = true;
+            recognition.lang = 'en-US';
 
             recognition.onstart = () => {
                 if (!sessionActive) {
@@ -361,24 +354,32 @@
                 if (!sessionActive || isProcessingOrSpeaking) return;
 
                 let interim = '';
+                let hasFinal = false;
+
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
                         finalTranscript += event.results[i][0].transcript + ' ';
+                        hasFinal = true;
                     } else {
                         interim += event.results[i][0].transcript;
                     }
                 }
 
-                subtitleBox.textContent = `You: "${finalTranscript + interim}"`;
+                const currentSpoken = (finalTranscript + interim).trim();
+                subtitleBox.textContent = `You: "${currentSpoken}"`;
 
                 clearTimeout(speechTimeout);
-                speechTimeout = setTimeout(() => {
-                    if (!sessionActive) return;
-                    const completeSentence = (finalTranscript + interim).trim();
-                    if (completeSentence.length > 3) {
-                        sendToJarvis(completeSentence);
-                    }
-                }, 1800);
+                
+                if (currentSpoken.length > 2) {
+                    // If you're pausing mid-thought (interim), wait 1600ms.
+                    // If speech engine confirms sentence end (isFinal), trigger faster (1100ms).
+                    const delay = hasFinal ? 1100 : 1600;
+
+                    speechTimeout = setTimeout(() => {
+                        if (!sessionActive || isProcessingOrSpeaking) return;
+                        sendToJarvis(currentSpoken);
+                    }, delay);
+                }
             };
 
             recognition.onerror = () => {
@@ -391,7 +392,7 @@
         }
 
         function toggleSession() {
-            window.speechSynthesis.resume();
+            if (window.speechSynthesis) window.speechSynthesis.resume();
 
             if (!sessionActive) {
                 sessionActive = true;
@@ -405,10 +406,33 @@
                 const wakeGreeting = `Online and ready, ${salutation}.`;
 
                 subtitleBox.textContent = `JARVIS: "${wakeGreeting}"`;
-                speakReply(wakeGreeting, false);
+                
+                fetchWakeAudio(wakeGreeting);
             } else {
                 shutdownSession();
             }
+        }
+
+        function fetchWakeAudio(text) {
+            const formData = new FormData();
+            formData.append('message', '__WAKE_GREETING__');
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            fetch("{% url 'assistance:jarvis_api' %}", {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.audio) {
+                    speakReply(data.reply, data.audio, false);
+                } else {
+                    speakReply(text, null, false);
+                }
+            })
+            .catch(() => {
+                speakReply(text, null, false);
+            });
         }
 
         function shutdownSession() {
@@ -420,7 +444,14 @@
                 try { recognition.abort(); } catch (e) {}
             }
 
-            window.speechSynthesis.cancel();
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+            }
+            if (window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+            }
+
             resetUI();
             statusText.textContent = "Systems Offline. Double-Clap or Click Core to Activate.";
         }
@@ -476,7 +507,7 @@
                 if (data.reply) {
                     const cleanReply = decodeHTML(data.reply);
                     subtitleBox.textContent = `JARVIS: "${cleanReply}"`;
-                    speakReply(cleanReply, data.shutdown || false);
+                    speakReply(cleanReply, data.audio || null, data.shutdown || false);
                 } else {
                     isProcessingOrSpeaking = false;
                     restartListeningWithDelay();
@@ -489,33 +520,67 @@
             });
         }
 
-        function speakReply(text, isShutdown = false) {
+        function speakReply(text, base64Audio = null, isShutdown = false) {
+            const cleanText = decodeHTML(text).replace(/[*_~#`]/g, '').trim();
+
+            if (base64Audio) {
+                if (currentAudio) {
+                    currentAudio.pause();
+                    currentAudio.currentTime = 0;
+                }
+
+                currentAudio = new Audio("data:audio/mp3;base64," + base64Audio);
+                
+                coreWrapper.className = 'core-wrapper speaking';
+                statusText.textContent = isShutdown ? "JARVIS Shutting Down..." : "JARVIS Transmitting...";
+
+                currentAudio.play().catch(e => {
+                    console.warn("Audio autoplay blocked or failed, falling back:", e);
+                    fallbackBrowserTTS(cleanText, isShutdown);
+                });
+
+                currentAudio.onended = () => {
+                    currentAudio = null;
+                    if (isShutdown) {
+                        shutdownSession();
+                    } else {
+                        setTimeout(() => {
+                            isProcessingOrSpeaking = false;
+                            if (sessionActive) {
+                                resetUI();
+                                startListening();
+                            } else {
+                                resetUI();
+                            }
+                        }, 400);
+                    }
+                };
+
+                currentAudio.onerror = () => {
+                    currentAudio = null;
+                    fallbackBrowserTTS(cleanText, isShutdown);
+                };
+                return;
+            }
+
+            fallbackBrowserTTS(cleanText, isShutdown);
+        }
+
+        function fallbackBrowserTTS(cleanText, isShutdown) {
             const synth = window.speechSynthesis;
             synth.cancel();
 
-            const cleanText = decodeHTML(text).replace(/[*_~#`]/g, '').trim();
-
             currentUtterance = new SpeechSynthesisUtterance(cleanText);
-
-            if (availableVoices.length === 0) availableVoices = synth.getVoices();
-
-            // Dynamic Voice Search optimized for Desktop and Mobile (Android / iOS)
-            const preferredMaleVoice = availableVoices.find(v => 
-                v.lang.includes('en-GB') || 
-                v.name.includes('David') || 
-                v.name.includes('George') ||
-                v.name.toLowerCase().includes('male') ||
-                v.name.toLowerCase().includes('guy') ||
-                v.name.includes('en-us-x-sfg-network') ||
-                v.name.includes('en-us-x-iom-network')
-            );
+            const voices = synth.getVoices();
+            const preferredMaleVoice = voices.find(v => 
+                v.lang.includes('en-US') && v.name.toLowerCase().includes('male')
+            ) || voices.find(v => v.name.includes('David') || v.name.includes('George'));
 
             if (preferredMaleVoice) {
                 currentUtterance.voice = preferredMaleVoice;
-                currentUtterance.pitch = 0.95;
+                currentUtterance.pitch = 0.85;
             } else {
-                // Mobile Fallback: Force deep low pitch to ensure male robotic sound
-                currentUtterance.pitch = 0.75; 
+                currentUtterance.pitch = 0.75;
             }
 
             currentUtterance.rate = 1.0;
@@ -538,12 +603,11 @@
                         } else {
                             resetUI();
                         }
-                    }, 800);
+                    }, 400);
                 }
             };
 
-            currentUtterance.onerror = (e) => {
-                console.error("Speech Synthesis Error:", e);
+            currentUtterance.onerror = () => {
                 currentUtterance = null;
                 if (isShutdown) {
                     shutdownSession();
@@ -557,9 +621,13 @@
             synth.speak(currentUtterance);
         }
 
-        window.addEventListener('click', () => {
+        function unlockMobileAudio() {
             initClapDetector();
-        }, { once: true });
+            if (window.speechSynthesis) window.speechSynthesis.resume();
+        }
+
+        window.addEventListener('click', unlockMobileAudio, { once: true });
+        window.addEventListener('touchstart', unlockMobileAudio, { once: true });
     </script>
 </body>
 </html>

@@ -1,4 +1,7 @@
 import os
+import base64
+import asyncio
+import edge_tts
 from django.shortcuts import render, redirect
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.decorators import login_required
@@ -12,6 +15,30 @@ client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
     base_url="https://api.groq.com/openai/v1"
 )
+
+# Deep American Male Neural AI Voice (No British Accent)
+JARVIS_VOICE = "en-US-ChristopherNeural"
+
+
+async def generate_voice_base64(text):
+    """Generates deep, bass-rich male audio using Edge-TTS."""
+    clean_text = text.replace('*', '').replace('#', '').strip()
+    try:
+        # pitch="-14Hz" provides deep bass resonance; rate="-2%" keeps it calm and authoritative
+        communicate = edge_tts.Communicate(
+            clean_text, 
+            JARVIS_VOICE, 
+            rate="-2%", 
+            pitch="-14Hz"
+        )
+        audio_data = bytearray()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_data.extend(chunk["data"])
+        return base64.b64encode(audio_data).decode('utf-8')
+    except Exception as e:
+        print(f"⚠️ Edge-TTS Error: {e}")
+        return None
 
 
 def detect_salutation(username):
@@ -74,7 +101,6 @@ def register_view(request):
 
 @login_required(login_url='assistance:login')
 def chat_view(request):
-    # Dynamically detects gender for page load & initial wake greeting
     salutation = detect_salutation(request.user.username)
     return render(request, 'assistance/chat.html', {'salutation': salutation})
 
@@ -91,11 +117,27 @@ def jarvis_api(request):
         salutation = detect_salutation(user_name)
         cmd = user_message.lower().strip()
 
-        # Instant voice override if user explicitly asks in chat
+        # Handle Wake Greeting Request
+        if cmd == "__wake_greeting__":
+            wake_reply = f"Online and ready, {salutation}."
+            audio_base64 = asyncio.run(generate_voice_base64(wake_reply))
+            return JsonResponse({'reply': wake_reply, 'audio': audio_base64})
+
+        # Dynamic salutation voice override
         if "i am a girl" in cmd or "i am female" in cmd or "call me ma'am" in cmd or "call me mam" in cmd:
-            salutation = "ma'am"
+            salutation = "maam"
         elif "i am a boy" in cmd or "i am male" in cmd or "call me sir" in cmd:
             salutation = "sir"
+
+        # Fast Shutdown / Goodbye
+        shutdown_keywords = ["goodbye", "good bye", "bye", "shutdown", "shut down", "go to sleep", "sleep"]
+        if any(word in cmd for word in shutdown_keywords):
+            reply = f"Shutting down systems. Have a good day, {salutation}."
+            ChatMessage.objects.create(user=request.user, role='user', content=user_message)
+            ChatMessage.objects.create(user=request.user, role='assistant', content=reply)
+            
+            audio_base64 = asyncio.run(generate_voice_base64(reply))
+            return JsonResponse({'reply': reply, 'audio': audio_base64, 'shutdown': True})
 
         # Save User Message
         ChatMessage.objects.create(user=request.user, role='user', content=user_message)
@@ -103,13 +145,6 @@ def jarvis_api(request):
         # Context Memory
         history = ChatMessage.objects.filter(user=request.user).order_by('-created_at')[:4]
         history_messages = [{"role": msg.role, "content": msg.content} for msg in reversed(history)]
-
-        # Fast Shutdown / Goodbye
-        shutdown_keywords = ["goodbye", "good bye", "bye", "shutdown", "shut down", "go to sleep", "sleep"]
-        if any(word in cmd for word in shutdown_keywords):
-            reply = f"Shutting down systems. Have a good day, {salutation}."
-            ChatMessage.objects.create(user=request.user, role='assistant', content=reply)
-            return JsonResponse({'reply': reply, 'shutdown': True})
 
         # Conditional Web Search
         live_context = get_live_web_context(user_message)
@@ -131,7 +166,7 @@ def jarvis_api(request):
                 f"For all other questions, answer directly without mentioning your creator or origin."
             )
 
-        other_salutation = "sir" if salutation == "ma'am" else "ma'am"
+        other_salutation = "sir" if salutation == "maam" else "maam"
 
         system_instruction = {
             "role": "system",
@@ -158,9 +193,14 @@ def jarvis_api(request):
 
             ChatMessage.objects.create(user=request.user, role='assistant', content=reply)
 
-            return JsonResponse({'reply': reply})
+            # Generate deep American male neural audio
+            audio_base64 = asyncio.run(generate_voice_base64(reply))
+
+            return JsonResponse({'reply': reply, 'audio': audio_base64})
         except Exception as e:
             print(f"❌ Groq API Error: {str(e)}")
-            return JsonResponse({'reply': f'My neural link experienced a slight glitch, {salutation}. Please try speaking again.'})
+            fallback_reply = f"My neural link experienced a slight glitch, {salutation}. Please try speaking again."
+            audio_base64 = asyncio.run(generate_voice_base64(fallback_reply))
+            return JsonResponse({'reply': fallback_reply, 'audio': audio_base64})
 
     return JsonResponse({'error': 'Invalid request method'}, status=405)
