@@ -19,16 +19,19 @@ client = OpenAI(
 # Deep American Male Neural AI Voice (No British Accent)
 JARVIS_VOICE = "en-US-ChristopherNeural"
 
+# In-memory salutation cache to avoid repetitive LLM calls on every request
+SALUTATION_CACHE = {}
+
 
 async def generate_voice_base64(text):
-    """Generates deep, bass-rich male audio using Edge-TTS."""
+    """Generates deep, bass-rich male audio using Edge-TTS with low latency."""
     clean_text = text.replace('*', '').replace('#', '').strip()
     try:
-        # pitch="-14Hz" provides deep bass resonance; rate="-2%" keeps it calm and authoritative
+        # pitch="-14Hz" provides deep bass resonance; rate="+3%" generates audio stream faster
         communicate = edge_tts.Communicate(
             clean_text, 
             JARVIS_VOICE, 
-            rate="-2%", 
+            rate="+3%", 
             pitch="-14Hz"
         )
         audio_data = bytearray()
@@ -42,11 +45,15 @@ async def generate_voice_base64(text):
 
 
 def detect_salutation(username):
-    """Uses Groq Llama to dynamically detect if a name/username is male or female."""
+    """Dynamically detects salutation and caches the result for zero-latency lookups."""
     clean_name = username.lower().strip()
+
+    if clean_name in SALUTATION_CACHE:
+        return SALUTATION_CACHE[clean_name]
 
     female_terms = ["girl", "woman", "female", "lady", "miss", "mrs", "ms"]
     if any(term in clean_name for term in female_terms):
+        SALUTATION_CACHE[clean_name] = "maam"
         return "maam"
 
     try:
@@ -63,9 +70,9 @@ def detect_salutation(username):
         )
 
         result = response.choices[0].message.content.strip().lower()
-        if "maam" in result or "female" in result or "ma'am" in result:
-            return "maam"
-        return "sir"
+        salutation = "maam" if ("maam" in result or "female" in result or "ma'am" in result) else "sir"
+        SALUTATION_CACHE[clean_name] = salutation
+        return salutation
     except Exception as e:
         print(f"⚠️ Salutation Detection Error: {e}")
         return "sir"
@@ -117,7 +124,7 @@ def jarvis_api(request):
         salutation = detect_salutation(user_name)
         cmd = user_message.lower().strip()
 
-        # Handle Wake Greeting Request
+        # Handle Fast Wake Greeting (Instant 0ms response path)
         if cmd == "__wake_greeting__":
             wake_reply = f"Online and ready, {salutation}."
             audio_base64 = asyncio.run(generate_voice_base64(wake_reply))
@@ -126,8 +133,10 @@ def jarvis_api(request):
         # Dynamic salutation voice override
         if "i am a girl" in cmd or "i am female" in cmd or "call me ma'am" in cmd or "call me mam" in cmd:
             salutation = "maam"
+            SALUTATION_CACHE[user_name.lower().strip()] = "maam"
         elif "i am a boy" in cmd or "i am male" in cmd or "call me sir" in cmd:
             salutation = "sir"
+            SALUTATION_CACHE[user_name.lower().strip()] = "sir"
 
         # Fast Shutdown / Goodbye
         shutdown_keywords = ["goodbye", "good bye", "bye", "shutdown", "shut down", "go to sleep", "sleep"]
@@ -142,7 +151,7 @@ def jarvis_api(request):
         # Save User Message
         ChatMessage.objects.create(user=request.user, role='user', content=user_message)
 
-        # Context Memory
+        # Context Memory (last 4 turns)
         history = ChatMessage.objects.filter(user=request.user).order_by('-created_at')[:4]
         history_messages = [{"role": msg.role, "content": msg.content} for msg in reversed(history)]
 

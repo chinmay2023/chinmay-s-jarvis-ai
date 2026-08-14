@@ -187,7 +187,7 @@
             100% { transform: scale(1.12); }
         }
 
-        /* Responsive Mobile Layout Adjustments */
+        /* Responsive Layout Adjustments */
         @media (max-width: 768px) {
             .header-status {
                 top: 18px;
@@ -264,7 +264,9 @@
         let speechTimeout = null;
         let currentAudio = null;
 
-        // Device Check
+        // Preloaded wake greeting in memory for 0ms wake latency
+        let preloadedWakeAudio = null;
+
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
         let audioContext = null;
@@ -279,14 +281,35 @@
             return txt.value;
         }
 
-        // Set initial display text
         statusText.textContent = isMobile 
             ? "Tap Core to Activate JARVIS" 
             : "Double-Clap or Click Core to Activate";
 
-        // --- 1. CLAP DETECTOR (Desktop / Laptop Only) ---
+        // --- PRELOAD WAKE AUDIO ON PAGE LOAD ---
+        function preloadWakeAudio() {
+            const formData = new FormData();
+            formData.append('message', '__wake_greeting__');
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            fetch("{% url 'assistance:jarvis_api' %}", {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.audio) {
+                    preloadedWakeAudio = new Audio("data:audio/mp3;base64," + data.audio);
+                    preloadedWakeAudio.preload = "auto";
+                }
+            })
+            .catch(() => {});
+        }
+
+        preloadWakeAudio();
+
+        // --- 1. INSTANT ZERO-LATENCY DOUBLE-CLAP DETECTOR ---
         async function initClapDetector() {
-            if (isMobile || sessionActive) return; // Completely disabled on mobile to prevent hardware locks
+            if (isMobile || sessionActive) return;
 
             if (audioContext) {
                 if (audioContext.state === 'suspended') await audioContext.resume();
@@ -314,25 +337,20 @@
                             if (deviation > maxPeak) maxPeak = deviation;
                         }
 
-                        if (maxPeak > 45) {
+                        // Sharp Clap Spike Threshold
+                        if (maxPeak > 42) {
                             const now = Date.now();
-                            if (now - lastClapTime > 150) {
-                                lastClapTime = now;
-                                clapCount++;
+                            const timeSinceLast = now - lastClapTime;
 
-                                if (clapCount === 1) {
-                                    statusText.textContent = "Clap 1 Detected...";
-                                    setTimeout(() => {
-                                        if (clapCount === 1) {
-                                            clapCount = 0;
-                                            statusText.textContent = sessionActive ? "Listening..." : "Double-Clap or Click Core to Activate";
-                                        }
-                                    }, 1200);
-                                } else if (clapCount >= 2) {
-                                    clapCount = 0;
-                                    statusText.textContent = "⚡ Double Clap Detected! Activating...";
-                                    if (!sessionActive) toggleSession();
-                                }
+                            // Immediate trigger on 2nd clap landing between 80ms and 480ms
+                            if (timeSinceLast > 80 && timeSinceLast < 480) {
+                                clapCount = 0;
+                                lastClapTime = 0;
+                                statusText.textContent = "⚡ Double Clap! Initializing...";
+                                if (!sessionActive) toggleSession();
+                            } else {
+                                lastClapTime = now;
+                                clapCount = 1;
                             }
                         }
                     }
@@ -340,7 +358,7 @@
                 }
                 monitorAudio();
             } catch (err) {
-                console.warn("Clap detector notice:", err);
+                console.warn("Clap detector initialization notice:", err);
                 statusText.textContent = "Click Core to Activate";
             }
         }
@@ -357,7 +375,6 @@
             }
 
             recognition = new SpeechRecognition();
-            // Continuous on laptop for hands-free chat; phrase-looping on mobile for stability
             recognition.continuous = !isMobile;
             recognition.interimResults = true;
             recognition.lang = 'en-US';
@@ -395,7 +412,7 @@
 
                 clearTimeout(speechTimeout);
                 if (liveText.length > 1) {
-                    const waitTime = hasFinal ? 1000 : 1600;
+                    const waitTime = hasFinal ? 900 : 1500;
                     speechTimeout = setTimeout(() => {
                         if (sessionActive && !isProcessingOrSpeaking && accumulatedTranscript.trim().length > 1) {
                             const query = accumulatedTranscript.trim();
@@ -409,7 +426,7 @@
             recognition.onerror = (event) => {
                 console.warn("Speech Recognition notice:", event.error);
                 if (event.error === 'not-allowed') {
-                    statusText.textContent = "Mic permission denied. Please allow mic in browser.";
+                    statusText.textContent = "Mic permission denied. Please allow microphone.";
                     sessionActive = false;
                     resetUI();
                 } else if (event.error !== 'no-speech' && sessionActive && !isProcessingOrSpeaking) {
@@ -430,21 +447,42 @@
             };
         }
 
-        // --- 3. SESSION MANAGEMENT ---
+        // --- 3. ZERO-DELAY SESSION WAKE ---
         function toggleSession() {
             if (!sessionActive) {
                 sessionActive = true;
                 isProcessingOrSpeaking = true;
                 accumulatedTranscript = '';
 
-                setupSpeechRecognition();
-
                 const rawSalutation = "{{ salutation|escapejs }}";
                 const salutation = decodeHTML(rawSalutation) || "sir";
                 const wakeGreeting = `Online and ready, ${salutation}.`;
 
                 subtitleBox.textContent = `JARVIS: "${wakeGreeting}"`;
-                fetchWakeAudio(wakeGreeting);
+                coreWrapper.className = 'core-wrapper speaking';
+                statusText.textContent = "JARVIS Transmitting...";
+
+                setupSpeechRecognition();
+
+                // Play instantly from preloaded RAM buffer if ready (0ms)
+                if (preloadedWakeAudio) {
+                    currentAudio = preloadedWakeAudio;
+                    currentAudio.currentTime = 0;
+                    currentAudio.play().catch(() => {});
+
+                    currentAudio.onended = () => {
+                        currentAudio = null;
+                        setTimeout(() => {
+                            isProcessingOrSpeaking = false;
+                            if (sessionActive) {
+                                resetUI();
+                                startListening();
+                            }
+                        }, 120);
+                    };
+                } else {
+                    fetchWakeAudio(wakeGreeting);
+                }
             } else {
                 shutdownSession();
             }
@@ -452,7 +490,7 @@
 
         function fetchWakeAudio(text) {
             const formData = new FormData();
-            formData.append('message', '__WAKE_GREETING__');
+            formData.append('message', '__wake_greeting__');
             formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
 
             fetch("{% url 'assistance:jarvis_api' %}", {
@@ -468,7 +506,8 @@
                 }
             })
             .catch(() => {
-                speakReply(text, null, false);
+                isProcessingOrSpeaking = false;
+                if (sessionActive) startListening();
             });
         }
 
@@ -505,13 +544,13 @@
                     if (sessionActive && !isProcessingOrSpeaking) {
                         try { recognition.start(); } catch(err2) {}
                     }
-                }, 200);
+                }, 100);
             }
         }
 
         function restartListeningWithDelay() {
             if (!sessionActive || isProcessingOrSpeaking) return;
-            setTimeout(() => { startListening(); }, 250);
+            setTimeout(() => { startListening(); }, 150);
         }
 
         function resetUI() {
@@ -593,7 +632,7 @@
                             } else {
                                 resetUI();
                             }
-                        }, 250);
+                        }, 120);
                     }
                 };
 
@@ -609,7 +648,7 @@
             if (sessionActive) restartListeningWithDelay();
         }
 
-        // On laptop, initiate clap listener on first interaction
+        // On laptop, initiate background clap listener on first user interaction
         window.addEventListener('click', () => {
             if (!isMobile) initClapDetector();
         }, { once: true });
