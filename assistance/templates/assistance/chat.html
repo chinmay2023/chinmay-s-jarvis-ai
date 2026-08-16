@@ -41,6 +41,76 @@
             pointer-events: none;
         }
 
+        /* Top Controls */
+        .top-nav {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .hud-btn {
+            background: rgba(0, 240, 255, 0.05);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            color: #00f0ff;
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .hud-btn:hover {
+            background: rgba(0, 240, 255, 0.2);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+            color: #ffffff;
+        }
+
+        /* Task Tray (Top-Left) */
+        .task-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            background: rgba(5, 8, 17, 0.75);
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            padding: 10px 14px;
+            border-radius: 10px;
+            max-width: 260px;
+            display: none;
+        }
+
+        .task-panel.visible {
+            display: block;
+        }
+
+        .task-header {
+            font-size: 0.72rem;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+            padding-bottom: 4px;
+        }
+
+        .task-list {
+            list-style: none;
+            font-size: 0.78rem;
+            color: #d1f7ff;
+        }
+
+        .task-list li {
+            margin: 4px 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         /* Header Status */
         .header-status {
             position: absolute;
@@ -70,34 +140,6 @@
         @keyframes blinkGlow {
             0% { opacity: 0.3; box-shadow: 0 0 2px #00f0ff; }
             100% { opacity: 1; box-shadow: 0 0 14px #00f0ff, 0 0 22px #00f0ff; }
-        }
-
-        /* Top Right Logout Button */
-        .logout-form {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            z-index: 10;
-        }
-
-        .logout-btn {
-            background: rgba(0, 240, 255, 0.05);
-            border: 1px solid rgba(0, 240, 255, 0.3);
-            color: #00f0ff;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.72rem;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            white-space: nowrap;
-        }
-
-        .logout-btn:hover {
-            background: rgba(0, 240, 255, 0.2);
-            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
-            color: #ffffff;
         }
 
         /* Central HUD Node */
@@ -187,15 +229,25 @@
             100% { transform: scale(1.12); }
         }
 
-        /* Responsive Layout Adjustments */
         @media (max-width: 768px) {
+            .top-nav {
+                top: 12px;
+                right: 12px;
+            }
+
+            .task-panel {
+                top: 60px;
+                left: 12px;
+                max-width: 200px;
+            }
+
             .header-status {
                 top: 18px;
                 left: 15px;
                 transform: none;
                 font-size: 0.65rem;
                 letter-spacing: 0.5px;
-                max-width: calc(100vw - 110px);
+                max-width: calc(100vw - 190px);
             }
 
             #statusText {
@@ -205,13 +257,8 @@
                 display: block;
             }
 
-            .logout-form {
-                top: 12px;
-                right: 12px;
-            }
-
-            .logout-btn {
-                padding: 6px 12px;
+            .hud-btn {
+                padding: 6px 10px;
                 font-size: 0.6rem;
             }
 
@@ -230,15 +277,33 @@
 <body>
 
     <div class="stage-container">
+        <!-- Top Left Task Overlay -->
+        <div class="task-panel" id="taskPanel">
+            <div class="task-header">Pending Directives</div>
+            <ul class="task-list" id="taskList">
+                {% if tasks %}
+                    {% for task in tasks %}
+                        <li>• {{ task.title }}</li>
+                    {% endfor %}
+                {% else %}
+                    <li>No active directives</li>
+                {% endif %}
+            </ul>
+        </div>
+
         <div class="header-status">
             <div class="status-dot" id="statusDot"></div>
             <span id="statusText">Initializing...</span>
         </div>
 
-        <form action="{% url 'assistance:logout' %}" method="POST" class="logout-form">
-            {% csrf_token %}
-            <button type="submit" class="logout-btn">Logout</button>
-        </form>
+        <div class="top-nav">
+            <button type="button" class="hud-btn" onclick="toggleTaskPanel()">Tasks</button>
+            <button type="button" class="hud-btn" onclick="clearMemory()">Purge</button>
+            <form action="{% url 'assistance:logout' %}" method="POST" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" class="hud-btn">Logout</button>
+            </form>
+        </div>
 
         <div class="core-wrapper" id="coreWrapper" onclick="toggleSession()">
             <div class="outer-ring"></div>
@@ -252,8 +317,9 @@
     <script>
         const coreWrapper = document.getElementById('coreWrapper');
         const statusText = document.getElementById('statusText');
-        const statusDot = document.getElementById('statusDot');
         const subtitleBox = document.getElementById('subtitleBox');
+        const taskPanel = document.getElementById('taskPanel');
+        const taskList = document.getElementById('taskList');
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
@@ -263,8 +329,6 @@
         let accumulatedTranscript = '';
         let speechTimeout = null;
         let currentAudio = null;
-
-        // Preloaded wake greeting in memory for 0ms wake latency
         let preloadedWakeAudio = null;
 
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -285,7 +349,43 @@
             ? "Tap Core to Activate JARVIS" 
             : "Double-Clap or Click Core to Activate";
 
-        // --- PRELOAD WAKE AUDIO ON PAGE LOAD ---
+        function toggleTaskPanel() {
+            taskPanel.classList.toggle('visible');
+            refreshTaskList();
+        }
+
+        function refreshTaskList() {
+            fetch("{% url 'assistance:get_tasks' %}")
+                .then(res => res.json())
+                .then(data => {
+                    if (data.tasks && data.tasks.length > 0) {
+                        taskList.innerHTML = data.tasks
+                            .filter(t => !t.is_completed)
+                            .slice(0, 5)
+                            .map(t => `<li>• ${t.title}</li>`)
+                            .join('') || '<li>No active directives</li>';
+                    } else {
+                        taskList.innerHTML = '<li>No active directives</li>';
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function clearMemory() {
+            if (confirm("Purge recent conversation logs?")) {
+                const formData = new FormData();
+                formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+                fetch("{% url 'assistance:clear_history' %}", {
+                    method: 'POST',
+                    body: formData
+                }).then(() => {
+                    subtitleBox.textContent = "Memory buffers cleared.";
+                    setTimeout(() => { subtitleBox.textContent = ""; }, 2500);
+                });
+            }
+        }
+
+        // --- PRELOAD WAKE AUDIO ON LOAD ---
         function preloadWakeAudio() {
             const formData = new FormData();
             formData.append('message', '__wake_greeting__');
@@ -307,7 +407,7 @@
 
         preloadWakeAudio();
 
-        // --- 1. INSTANT ZERO-LATENCY DOUBLE-CLAP DETECTOR ---
+        // --- 1. CLAP DETECTION ---
         async function initClapDetector() {
             if (isMobile || sessionActive) return;
 
@@ -325,7 +425,6 @@
                 source.connect(analyser);
 
                 const dataArray = new Uint8Array(analyser.fftSize);
-                statusText.textContent = "Clap Detection Active | Double-Clap or Click Core";
 
                 function monitorAudio() {
                     if (!sessionActive && !isProcessingOrSpeaking && audioContext && audioContext.state === 'running') {
@@ -337,12 +436,10 @@
                             if (deviation > maxPeak) maxPeak = deviation;
                         }
 
-                        // Sharp Clap Spike Threshold
                         if (maxPeak > 42) {
                             const now = Date.now();
                             const timeSinceLast = now - lastClapTime;
 
-                            // Immediate trigger on 2nd clap landing between 80ms and 480ms
                             if (timeSinceLast > 80 && timeSinceLast < 480) {
                                 clapCount = 0;
                                 lastClapTime = 0;
@@ -358,15 +455,14 @@
                 }
                 monitorAudio();
             } catch (err) {
-                console.warn("Clap detector initialization notice:", err);
-                statusText.textContent = "Click Core to Activate";
+                console.warn("Clap detector notice:", err);
             }
         }
 
-        // --- 2. HYBRID SPEECH RECOGNITION ---
+        // --- 2. ACCENT-OPTIMIZED RECOGNITION ---
         function setupSpeechRecognition() {
             if (!SpeechRecognition) {
-                statusText.textContent = "Speech Recognition not supported in this browser.";
+                statusText.textContent = "Speech Recognition unsupported in this browser.";
                 return;
             }
 
@@ -377,7 +473,7 @@
             recognition = new SpeechRecognition();
             recognition.continuous = !isMobile;
             recognition.interimResults = true;
-            recognition.lang = 'en-US';
+            recognition.lang = 'en-IN';
             recognition.maxAlternatives = 1;
 
             recognition.onstart = () => {
@@ -424,7 +520,7 @@
             };
 
             recognition.onerror = (event) => {
-                console.warn("Speech Recognition notice:", event.error);
+                console.warn("Recognition notice:", event.error);
                 if (event.error === 'not-allowed') {
                     statusText.textContent = "Mic permission denied. Please allow microphone.";
                     sessionActive = false;
@@ -464,7 +560,6 @@
 
                 setupSpeechRecognition();
 
-                // Play instantly from preloaded RAM buffer if ready (0ms)
                 if (preloadedWakeAudio) {
                     currentAudio = preloadedWakeAudio;
                     currentAudio.currentTime = 0;
@@ -589,6 +684,7 @@
                     const cleanReply = decodeHTML(data.reply);
                     subtitleBox.textContent = `JARVIS: "${cleanReply}"`;
                     speakReply(cleanReply, data.audio || null, data.shutdown || false);
+                    refreshTaskList();
                 } else {
                     isProcessingOrSpeaking = false;
                     restartListeningWithDelay();
@@ -648,7 +744,6 @@
             if (sessionActive) restartListeningWithDelay();
         }
 
-        // On laptop, initiate background clap listener on first user interaction
         window.addEventListener('click', () => {
             if (!isMobile) initClapDetector();
         }, { once: true });

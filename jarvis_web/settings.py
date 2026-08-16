@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import dj_database_url
 from dotenv import load_dotenv
 
 # Define BASE_DIR (points to jarvis_web project root)
@@ -68,12 +69,12 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'jarvis_web.wsgi.application'
 
-# Database Configuration
+# Database Configuration (Uses Neon PostgreSQL if DATABASE_URL exists, else SQLite locally)
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+        conn_max_age=600
+    )
 }
 
 AUTH_PASSWORD_VALIDATORS = [
