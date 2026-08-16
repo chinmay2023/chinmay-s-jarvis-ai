@@ -16,13 +16,23 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-!93n#f=^tvr8xc(fuz!xb((ay5
 DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
 
 # ALLOWED_HOSTS for local and cloud platforms
-# ALLOWED_HOSTS for local and cloud platforms
 ALLOWED_HOSTS = ['*']
+
+# Reverse Proxy & SSL Configuration (Required for Render HTTPS)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+
+# CSRF & Session Cookie Settings for Production HTTPS
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_HTTPONLY = False
 
 # CSRF Trusted Origins (Production HTTPS domains)
 CSRF_TRUSTED_ORIGINS = [
     'https://chinmay-s-jarvis-ai.onrender.com',
     'https://*.onrender.com',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
 ]
 
 RENDER_EXTERNAL_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME')

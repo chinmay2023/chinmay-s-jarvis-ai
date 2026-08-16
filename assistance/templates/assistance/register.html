@@ -15,7 +15,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            overflow: hidden; /* Locks page scroll entirely */
+            overflow: hidden;
             position: relative;
         }
 
@@ -39,18 +39,18 @@
             box-shadow: 0 0 30px rgba(0, 240, 255, 0.15);
             width: 88%;
             max-width: 380px;
-            padding: 20px 18px;
+            padding: 22px 20px;
             z-index: 1;
             backdrop-filter: blur(10px);
             text-align: center;
             max-height: 92vh;
-            overflow-y: auto; /* Allows smooth inner scroll if screen is extremely short */
-            -ms-overflow-style: none; /* Hide scrollbars */
+            overflow-y: auto;
+            -ms-overflow-style: none;
             scrollbar-width: none;
         }
 
         .card::-webkit-scrollbar {
-            display: none; /* Hide scrollbar Chrome/Safari/Edge */
+            display: none;
         }
 
         .card h2 {
@@ -58,7 +58,7 @@
             letter-spacing: 2px;
             text-transform: uppercase;
             color: #00f0ff;
-            margin-bottom: 12px;
+            margin-bottom: 14px;
             text-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
         }
 
@@ -78,7 +78,7 @@
             display: block;
         }
 
-        input[type="text"], input[type="password"] {
+        input[type="text"], input[type="password"], input[type="email"] {
             width: 100%;
             padding: 8px 10px;
             background: rgba(5, 8, 17, 0.8);
@@ -90,7 +90,7 @@
             transition: all 0.3s ease;
         }
 
-        input[type="text"]:focus, input[type="password"]:focus {
+        input[type="text"]:focus, input[type="password"]:focus, input[type="email"]:focus {
             border-color: #00f0ff;
             box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
         }
@@ -109,6 +109,7 @@
             font-size: 0.7rem;
             list-style: none;
             margin-bottom: 2px;
+            padding-left: 0;
         }
 
         .btn-submit {
@@ -153,7 +154,7 @@
     <div class="card">
         <h2>Join J.A.R.V.I.S.</h2>
         
-        <form method="POST">
+        <form method="POST" action="{% url 'assistance:register' %}">
             {% csrf_token %}
             {% for field in form %}
                 <div>

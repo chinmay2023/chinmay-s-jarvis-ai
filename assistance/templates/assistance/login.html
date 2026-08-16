@@ -129,7 +129,7 @@
     <div class="card">
         <h2>Access J.A.R.V.I.S.</h2>
         
-        <form method="POST">
+        <form method="POST" action="{% url 'assistance:login' %}">
             {% csrf_token %}
             {% if form.non_field_errors %}
                 <div style="color: #ff4d4d; font-size: 0.75rem; margin-bottom: 6px;">

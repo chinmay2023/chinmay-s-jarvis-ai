@@ -386,3 +386,12 @@ def jarvis_api(request):
         fallback_reply = f"My neural link experienced a slight glitch, {salutation}. Please try speaking again."
         audio_base64 = asyncio.run(generate_voice_base64(fallback_reply))
         return JsonResponse({'reply': fallback_reply, 'audio': audio_base64})
+
+
+from django.contrib.auth import logout
+from django.shortcuts import redirect
+
+def logout_view(request):
+    """Handles both GET and POST requests cleanly to log the user out."""
+    logout(request)
+    return redirect('assistance:login')
