@@ -21,3 +21,9 @@ __pycache__/
 # Static / Media Files
 /static/
 /media/
+
+staticfiles/
+*.pyc
+__pycache__/
+db.sqlite3
+.env

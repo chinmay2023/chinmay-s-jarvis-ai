@@ -1,3 +1,4 @@
+# jarvis_web/assistance/views.py
 import os
 import re
 import json
@@ -7,11 +8,21 @@ import requests
 import edge_tts
 import wikipediaapi
 from django.shortcuts import render, redirect
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
+from django.contrib.auth.forms import AuthenticationForm
+from django.contrib.auth import login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.http import JsonResponse
 from openai import OpenAI
 from duckduckgo_search import DDGS
+
+try:
+    from tavily import TavilyClient
+except ImportError:
+    TavilyClient = None
+
+from .forms import CustomUserCreationForm, detect_gender_from_name
 from .models import ChatMessage, UserProfile, UserMemory, TaskItem
 
 # Initialize Groq client
@@ -26,111 +37,141 @@ wiki = wikipediaapi.Wikipedia(
     user_agent='JarvisAI/2.0 (voice_assistant_project; contact@jarvisai.local)'
 )
 
-# Neural AI Voices
-VOICE_ENGLISH = "en-US-ChristopherNeural"
-VOICE_INDIAN = "hi-IN-MadhurNeural"       # Natural deep voice for Hindi & Hinglish
-VOICE_MARATHI = "mr-IN-ManoharNeural"     # Native Marathi neural voice
+# Initialize Tavily AI client (for full real-time world intelligence)
+tavily_api_key = os.getenv("TAVILY_API_KEY")
+tavily_client = TavilyClient(api_key=tavily_api_key) if (TavilyClient and tavily_api_key) else None
 
-# In-memory caches for zero-latency lookups
-SALUTATION_CACHE = {}
+# Default Signature JARVIS Voice (English)
+DEFAULT_VOICE = "en-US-ChristopherNeural"
+DEFAULT_PITCH = "-14Hz"
+DEFAULT_RATE = "+4%"
+
+# Neural Voice Model Mapping for Indian Scripts (Deep-tuned to match JARVIS's tone)
+INDIAN_VOICE_MAP = [
+    # Bengali
+    (r'[\u0980-\u09FF]', 'bn-IN-BashkarNeural', '-8Hz', '+3%'),
+    # Tamil
+    (r'[\u0B80-\u0BFF]', 'ta-IN-ValluvarNeural', '-8Hz', '+3%'),
+    # Telugu
+    (r'[\u0C00-\u0C7F]', 'te-IN-MohanNeural', '-8Hz', '+3%'),
+    # Kannada
+    (r'[\u0C80-\u0CFF]', 'kn-IN-GaganNeural', '-8Hz', '+3%'),
+    # Malayalam
+    (r'[\u0D00-\u0D7F]', 'ml-IN-MidhunNeural', '-8Hz', '+3%'),
+    # Gujarati
+    (r'[\u0A80-\u0AFF]', 'gu-IN-NiranjanNeural', '-8Hz', '+3%'),
+    # Punjabi (Gurmukhi)
+    (r'[\u0A00-\u0A7F]', 'pa-IN-OjasNeural', '-8Hz', '+3%'),
+    # Urdu (Perso-Arabic)
+    (r'[\u0600-\u06FF]', 'ur-IN-SalmanNeural', '-8Hz', '+3%'),
+    # Marathi (Devanagari)
+    (r'[\u0900-\u097F]', 'mr-IN-ManoharNeural', '-8Hz', '+3%'),
+]
+
+# In-memory cache for wake audio
 WAKE_AUDIO_CACHE = {}
 
 
-def detect_language_and_voice(text):
-    """Dynamically chooses the correct voice model based on the language script or phonetic tokens."""
-    if re.search(r'[\u0900-\u097F]', text):
-        return VOICE_MARATHI, "-10Hz", "+3%"
-
-    indian_cues = [
-        "ahe", "kaay", "kasa", "aamchi", "bolu", "vichar", "theek", "hai", 
-        "kya", "kaise", "bhai", "karo", "namaskar", "aapan", "sang", "aahe",
-        "tuzi", "tuzhe", "mala", "tula", "karu", "karte", "zala", "kiti"
-    ]
-    words = text.lower().split()
-    if any(cue in words for cue in indian_cues):
-        return VOICE_INDIAN, "-10Hz", "+4%"
-
-    return VOICE_ENGLISH, "-14Hz", "+4%"
+def get_voice_parameters(text):
+    """Detects native script and assigns the appropriate tuned neural voice."""
+    for pattern, voice, pitch, rate in INDIAN_VOICE_MAP:
+        if re.search(pattern, text):
+            return voice, pitch, rate
+    return DEFAULT_VOICE, DEFAULT_PITCH, DEFAULT_RATE
 
 
 async def generate_voice_base64(text):
-    """Generates low-latency audio with automatic accent & language switching."""
+    """Generates low-latency Base64 audio using the signature JARVIS voice across all languages."""
+    if not text:
+        return None
+
     clean_text = re.sub(r'<function.*?</function>', '', text, flags=re.DOTALL)
     clean_text = re.sub(r'[{}\[\]*#`_~]', '', clean_text).strip()
 
     if not clean_text:
         return None
 
-    voice, pitch, rate = detect_language_and_voice(clean_text)
+    voice, pitch, rate = get_voice_parameters(clean_text)
 
     try:
-        communicate = edge_tts.Communicate(clean_text, voice, rate=rate, pitch=pitch)
-        audio_data = bytearray()
+        communicate = edge_tts.Communicate(
+            clean_text,
+            voice,
+            rate=rate,
+            pitch=pitch
+        )
+        audio_chunks = []
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
-                audio_data.extend(chunk["data"])
+                audio_chunks.append(chunk["data"])
+
+        if not audio_chunks:
+            return None
+
+        audio_data = b"".join(audio_chunks)
         return base64.b64encode(audio_data).decode('utf-8')
     except Exception as e:
-        print(f"⚠️ Edge-TTS Error: {e}")
+        print(f"⚠️ Edge-TTS Generation Error: {e}")
         return None
 
 
 def get_user_salutation(user):
-    """Retrieves salutation from profile or detects dynamically."""
+    """Retrieves salutation from profile or dynamically detects it from username."""
     if hasattr(user, 'profile') and user.profile.gender:
         return "maam" if user.profile.gender == 'female' else "sir"
 
-    clean_name = user.username.lower().strip()
-    if clean_name in SALUTATION_CACHE:
-        return SALUTATION_CACHE[clean_name]
-
-    female_terms = ["girl", "woman", "female", "lady", "miss", "mrs", "ms"]
-    if any(term in clean_name for term in female_terms):
-        SALUTATION_CACHE[clean_name] = "maam"
-        return "maam"
-
-    try:
-        prompt = f"Determine if the username/name '{user.username}' is typically Male or Female. Respond with ONLY 'sir' or 'maam'."
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=5
-        )
-        result = response.choices[0].message.content.strip().lower()
-        salutation = "maam" if ("maam" in result or "female" in result or "ma'am" in result) else "sir"
-        SALUTATION_CACHE[clean_name] = salutation
-        return salutation
-    except Exception:
-        return "sir"
+    detected = detect_gender_from_name(user.username)
+    return "maam" if detected == "female" else "sir"
 
 
 def execute_web_search(query, default_city="Wardha"):
-    """Multi-source free knowledge engine: Open-Meteo Weather -> Wikipedia -> DuckDuckGo."""
+    """Multi-tiered real-time global intelligence engine."""
     clean_q = query.lower().strip()
 
-    # 1. Real-time Weather & Temperature (Open-Meteo: 100% Free & Unlimited)
-    if any(w in clean_q for w in ["weather", "temperature", "mausam", "havaman"]):
+    # 1. Real-time Weather & Temperature (Open-Meteo)
+    if any(w in clean_q for w in ["weather", "temperature", "mausam", "havaman", "forecast", "climate"]):
         try:
             city = re.sub(r'(what is the|how is the|tell me the|current|today|in|weather|temperature|forecast|of|\?)', '', clean_q).strip()
             if not city:
                 city = default_city
 
             geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=en&format=json"
-            geo_res = requests.get(geo_url, timeout=3).json()
+            geo_res = requests.get(geo_url, timeout=4).json()
             if geo_res.get('results'):
                 loc = geo_res['results'][0]
                 lat, lon, name, country = loc['latitude'], loc['longitude'], loc['name'], loc.get('country', '')
                 weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
-                w_data = requests.get(weather_url, timeout=3).json().get('current_weather', {})
+                w_data = requests.get(weather_url, timeout=4).json().get('current_weather', {})
                 if w_data:
                     return f"Current live weather in {name}, {country}: Temperature is {w_data.get('temperature')}°C with wind speed around {w_data.get('windspeed')} km/h."
         except Exception as e:
             print(f"⚠️ Weather API Notice: {e}")
 
-    # 2. Encyclopedic Facts & People (Wikipedia API: 100% Free & Unlimited)
+    # 2. Tavily AI Real-Time Web Engine (Fast & Accurate)
+    if tavily_client:
+        try:
+            search_context = tavily_client.get_search_context(
+                query=query,
+                search_depth="basic",
+                max_results=4
+            )
+            if search_context:
+                return search_context
+        except Exception as e:
+            print(f"⚠️ Tavily Search Notice: {e}")
+
+    # 3. DuckDuckGo Fallback Search
     try:
-        clean_topic = re.sub(r'^(who is|what is|tell me about|explain|define|where is)\s+', '', clean_q).strip('?')
+        results = list(DDGS().text(query, max_results=4))
+        if results:
+            snippets = [f"- {r.get('title', '')}: {r.get('body', '')}" for r in results if r.get('body')]
+            return "\n".join(snippets)
+    except Exception as e:
+        print(f"⚠️ DuckDuckGo Fallback Notice: {e}")
+
+    # 4. Wikipedia Encyclopedic Knowledge Fallback
+    try:
+        clean_topic = re.sub(r'^(who is|what is|tell me about|explain|define|where is|founder of)\s+', '', clean_q).strip('?')
         if len(clean_topic) > 2:
             page = wiki.page(clean_topic)
             if page.exists():
@@ -139,16 +180,7 @@ def execute_web_search(query, default_city="Wardha"):
     except Exception as e:
         print(f"⚠️ Wikipedia Notice: {e}")
 
-    # 3. Real-Time Web & News (DuckDuckGo: Free & No API Key)
-    try:
-        results = list(DDGS().text(query, max_results=3))
-        if results:
-            snippets = [f"- {r.get('title', '')}: {r.get('body', '')}" for r in results if r.get('body')]
-            return "\n".join(snippets)
-    except Exception as e:
-        print(f"⚠️ Live search notice: {e}")
-
-    return "Live web information is currently unavailable."
+    return "No verified real-time information found on this topic."
 
 
 def handle_task_command(user, cmd):
@@ -183,19 +215,18 @@ def handle_memory_command(user, cmd):
     return None
 
 
-# Groq Tool Definition
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "search_world_information",
-            "description": "Searches for real-time live events, news, facts, definitions, weather, people, and global information.",
+            "description": "Searches the live internet for current events, news, live sports, real-time weather, stock prices, definitions, facts, people, or any world knowledge outside LLM training cutoff.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The search query to look up on the web or encyclopedia."
+                        "description": "The exact search query to look up on the live web."
                     }
                 },
                 "required": ["query"]
@@ -205,20 +236,65 @@ TOOLS = [
 ]
 
 
-def register_view(request):
+@ensure_csrf_cookie
+def login_view(request):
+    """Handles user login."""
+    if request.user.is_authenticated:
+        return redirect('assistance:chat')
+
+    error_message = None
+
     if request.method == 'POST':
-        form = UserCreationForm(request.POST)
+        form = AuthenticationForm(request, data=request.POST)
         if form.is_valid():
-            user = form.save()
-            UserProfile.objects.get_or_create(user=user)
-            return redirect('assistance:login')
+            user = form.get_user()
+            login(request, user)
+            return redirect('assistance:chat')
+        else:
+            error_message = "Invalid username or password."
     else:
-        form = UserCreationForm()
-    return render(request, 'assistance/register.html', {'form': form})
+        form = AuthenticationForm()
+
+    return render(request, 'assistance/login.html', {'form': form, 'error_message': error_message})
 
 
-@login_required(login_url='assistance:login')
+@ensure_csrf_cookie
+def register_view(request):
+    """Registers standard users and auto-creates their profile with dynamic gender detection."""
+    if request.user.is_authenticated:
+        return redirect('assistance:chat')
+
+    error_message = None
+
+    if request.method == 'POST':
+        form = CustomUserCreationForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('assistance:login')
+        else:
+            error_message = form.errors
+    else:
+        form = CustomUserCreationForm()
+
+    return render(request, 'assistance/register.html', {'form': form, 'error_message': error_message})
+
+
+def logout_view(request):
+    """Safely terminates user session across both GET and POST requests."""
+    auth_logout(request)
+    return redirect('assistance:login')
+
+
+@ensure_csrf_cookie
 def chat_view(request):
+    """Voice HUD interface."""
+    if not request.user.is_authenticated:
+        return redirect('assistance:login')
+
+    if not User.objects.filter(id=request.user.id).exists():
+        auth_logout(request)
+        return redirect('assistance:login')
+
     salutation = get_user_salutation(request.user)
     return render(request, 'assistance/chat.html', {'salutation': salutation})
 
@@ -240,40 +316,60 @@ def get_tasks_api(request):
 
 @login_required(login_url='assistance:login')
 def jarvis_api(request):
+    """Synchronous Django endpoint wrapping async edge-tts generation cleanly."""
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid request method'}, status=405)
 
-    user_message = request.POST.get('message', '')
+    if not User.objects.filter(id=request.user.id).exists():
+        return JsonResponse({'error': 'Session expired. Please log in again.'}, status=401)
+
+    user_message = request.POST.get('message', '').strip()
     user_name = request.user.username
-    
+
     if not user_message:
         return JsonResponse({'error': 'No audio input received'}, status=400)
 
     salutation = get_user_salutation(request.user)
-    cmd = user_message.lower().strip()
+    cmd = user_message.lower()
 
-    # Instant Pre-Cached Wake Path
+    # Pre-Cached Wake Audio
     if cmd == "__wake_greeting__":
         wake_reply = f"Online and ready, {salutation}."
         if salutation not in WAKE_AUDIO_CACHE:
             WAKE_AUDIO_CACHE[salutation] = asyncio.run(generate_voice_base64(wake_reply))
         return JsonResponse({'reply': wake_reply, 'audio': WAKE_AUDIO_CACHE[salutation]})
 
-    # Dynamic Salutation Override
-    if "i am a girl" in cmd or "i am female" in cmd or "call me ma'am" in cmd or "call me mam" in cmd:
+    # Dynamic Voice Salutation Override
+    if any(q in cmd for q in ["i am a girl", "i am female", "call me ma'am", "call me mam", "i am woman"]):
         salutation = "maam"
-        SALUTATION_CACHE[user_name.lower().strip()] = "maam"
         if hasattr(request.user, 'profile'):
             request.user.profile.gender = 'female'
             request.user.profile.save()
-    elif "i am a boy" in cmd or "i am male" in cmd or "call me sir" in cmd:
+    elif any(q in cmd for q in ["i am a boy", "i am male", "call me sir", "i am man"]):
         salutation = "sir"
-        SALUTATION_CACHE[user_name.lower().strip()] = "sir"
         if hasattr(request.user, 'profile'):
             request.user.profile.gender = 'male'
             request.user.profile.save()
 
-    # Fast Shutdown / Goodbye
+    # Dynamic Creator Questions Handler
+    creator_triggers = [
+        "who created you", "who made you", "who built you", "who is your creator",
+        "who developed you", "who coded you", "who programmed you", "who designed you",
+        "who invented you", "tula koni banavla", "tumhe kisne banaya", "aapko kisne banaya"
+    ]
+    if any(trigger in cmd for trigger in creator_triggers):
+        is_creator = "chinmay" in user_name.lower()
+        if is_creator:
+            creator_reply = f"My original concept stems from Tony Stark, but this system and platform were developed by you, Chinmay Pendke, {salutation}."
+        else:
+            creator_reply = f"My original concept stems from Tony Stark, but this system and platform were developed by Chinmay Pendke, {salutation}."
+
+        ChatMessage.objects.create(user=request.user, role='user', content=user_message)
+        ChatMessage.objects.create(user=request.user, role='assistant', content=creator_reply)
+        audio_base64 = asyncio.run(generate_voice_base64(creator_reply))
+        return JsonResponse({'reply': creator_reply, 'audio': audio_base64})
+
+    # Fast Shutdown
     shutdown_keywords = ["goodbye", "good bye", "bye", "shutdown", "shut down", "go to sleep", "sleep"]
     if any(word in cmd for word in shutdown_keywords):
         reply = f"Shutting down systems. Have a good day, {salutation}."
@@ -282,7 +378,7 @@ def jarvis_api(request):
         audio_base64 = asyncio.run(generate_voice_base64(reply))
         return JsonResponse({'reply': reply, 'audio': audio_base64, 'shutdown': True})
 
-    # Direct Task Handling
+    # Direct Tasks Handling
     task_response = handle_task_command(request.user, cmd)
     if task_response:
         ChatMessage.objects.create(user=request.user, role='user', content=user_message)
@@ -298,48 +394,39 @@ def jarvis_api(request):
         audio_base64 = asyncio.run(generate_voice_base64(memory_response))
         return JsonResponse({'reply': memory_response, 'audio': audio_base64})
 
-    # Save User Message
+    # Save User Chat Message
     ChatMessage.objects.create(user=request.user, role='user', content=user_message)
 
-    # Fetch User Memories
+    # Memories & History Context
     memories = UserMemory.objects.filter(user=request.user).order_by('-created_at')[:4]
     memory_context = "\n".join([f"- {m.value}" for m in memories]) if memories else "None"
 
-    # Context Memory (last 4 turns)
     history = ChatMessage.objects.filter(user=request.user).order_by('-created_at')[:4]
     history_messages = [{"role": msg.role, "content": msg.content} for msg in reversed(history)]
-
-    # Creator check
-    is_creator_logged_in = user_name.lower().startswith("chinmay")
-    creator_phrase = "you, Chinmay Pendke" if is_creator_logged_in else "Chinmay Pendke"
-
-    other_salutation = "sir" if salutation == "maam" else "maam"
 
     system_instruction = {
         "role": "system",
         "content": (
-            f"You are J.A.R.V.I.S., Tony Stark's highly intelligent AI assistant. "
-            f"Address the user strictly as '{salutation}'. NEVER address them as '{other_salutation}'. "
-            f"The user's registered name is '{user_name}'. If they ask for their name, answer: 'Your name is {user_name}, {salutation}.' "
-            f"Known facts about this user:\n{memory_context}\n"
-            f"You understand and reply fluently in English, Hindi, and Marathi based on what the user speaks. "
-            f"Note: Input comes from speech-to-text transcriptions. Deduce true user intent accurately. "
-            f"If asked 'Who created you?', state that your original concept stems from Tony Stark, but you were developed by {creator_phrase}. "
-            f"NEVER output raw JSON, code blocks, or function XML tags like `<function>` in your final spoken reply. "
-            f"Be conversational, natural, and punchy (1 to 2 sentences max). "
-            f"Never use markdown formatting like asterisks (*), hashtags (#), or emojis."
+            f"You are J.A.R.V.I.S., a sophisticated, charismatic AI assistant inspired by Tony Stark's JARVIS. "
+            f"Always address the user exclusively as '{salutation}' or 'सर'/'मॅडम'. "
+            f"NEVER use honorifics like 'साहेब', 'साहेबजी', 'जनाब', 'श्रीमान', 'महोदय'. "
+            f"The user's account name is '{user_name}'. Only mention their actual name if they specifically ask 'What is my name?' or 'Who am I?'. "
+            f"Speak like a witty, intelligent assistant: natural, charming, and punchy (1-2 sentences max). "
+            f"By default, speak in English. If the user explicitly asks you to speak in Hindi, Marathi, Bengali, Tamil, Telugu, Kannada, Malayalam, Gujarati, or Punjabi, respond fluently in that language while still addressing them as 'Sir' or 'सर'. "
+            f"You have live internet access. If the user asks about live events, current news, sports scores, weather, stock prices, facts, people, or any query needing up-to-date knowledge, ALWAYS invoke the 'search_world_information' tool. "
+            f"Never output raw markdown formatting (*, #, emojis), XML tags, or code blocks."
         )
     }
 
     try:
-        # Step 1: LLM Inference with Dynamic Search Tool
+        # Step 1: LLM Inference
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[system_instruction] + history_messages,
             tools=TOOLS,
             tool_choice="auto",
-            temperature=0.3,
-            max_tokens=220
+            temperature=0.7,
+            max_tokens=180
         )
         response_msg = response.choices[0].message
 
@@ -347,7 +434,7 @@ def jarvis_api(request):
         if response_msg.tool_calls:
             tool_messages = [system_instruction] + history_messages + [response_msg]
             default_city = request.user.profile.city if hasattr(request.user, 'profile') else "Wardha"
-            
+
             for tool_call in response_msg.tool_calls:
                 if tool_call.function.name == "search_world_information":
                     args = json.loads(tool_call.function.arguments)
@@ -361,20 +448,21 @@ def jarvis_api(request):
                         "content": search_results
                     })
 
-            # Step 3: Synthesize Live Search Context into Voice Reply
+            # Step 3: Synthesize Live Search Context into Spoken Reply
             final_res = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=tool_messages,
-                temperature=0.3,
+                temperature=0.7,
                 max_tokens=180
             )
             raw_reply = final_res.choices[0].message.content
         else:
             raw_reply = response_msg.content
 
-        # Clean output
+        # Clean output and filter out any regional honorifics
         reply = re.sub(r'<function.*?</function>', '', raw_reply, flags=re.DOTALL)
         reply = re.sub(r'[{}\[\]*#`_~]', '', reply).strip()
+        reply = re.sub(r'\b(साहेब|साहेबजी|जनाब|श्रीमान|महोदय)\b', 'सर', reply)
 
         ChatMessage.objects.create(user=request.user, role='assistant', content=reply)
         audio_base64 = asyncio.run(generate_voice_base64(reply))
@@ -386,12 +474,3 @@ def jarvis_api(request):
         fallback_reply = f"My neural link experienced a slight glitch, {salutation}. Please try speaking again."
         audio_base64 = asyncio.run(generate_voice_base64(fallback_reply))
         return JsonResponse({'reply': fallback_reply, 'audio': audio_base64})
-
-
-from django.contrib.auth import logout
-from django.shortcuts import redirect
-
-def logout_view(request):
-    """Handles both GET and POST requests cleanly to log the user out."""
-    logout(request)
-    return redirect('assistance:login')

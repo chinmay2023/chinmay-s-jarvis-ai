@@ -1,3 +1,4 @@
+<!--login.html-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -70,7 +71,7 @@
             display: block;
         }
 
-        input[type="text"], input[type="password"] {
+        .input-field {
             width: 100%;
             padding: 10px 12px;
             background: rgba(5, 8, 17, 0.8);
@@ -82,9 +83,16 @@
             transition: all 0.3s ease;
         }
 
-        input[type="text"]:focus, input[type="password"]:focus {
+        .input-field:focus {
             border-color: #00f0ff;
             box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
+        }
+
+        .error-banner {
+            color: #ff4d4d;
+            font-size: 0.75rem;
+            margin-bottom: 8px;
+            line-height: 1.4;
         }
 
         .btn-submit {
@@ -131,20 +139,21 @@
         
         <form method="POST" action="{% url 'assistance:login' %}">
             {% csrf_token %}
-            {% if form.non_field_errors %}
-                <div style="color: #ff4d4d; font-size: 0.75rem; margin-bottom: 6px;">
-                    {{ form.non_field_errors }}
-                </div>
+
+            {% if error_message %}
+                <div class="error-banner">{{ error_message }}</div>
+            {% elif form.non_field_errors %}
+                <div class="error-banner">{{ form.non_field_errors }}</div>
             {% endif %}
 
             <div>
                 <label for="id_username">Username</label>
-                {{ form.username }}
+                <input type="text" name="username" id="id_username" class="input-field" placeholder="Enter username" required autofocus autocomplete="username">
             </div>
 
             <div>
                 <label for="id_password">Password</label>
-                {{ form.password }}
+                <input type="password" name="password" id="id_password" class="input-field" placeholder="Enter password" required autocomplete="current-password">
             </div>
 
             <button type="submit" class="btn-submit">Login</button>

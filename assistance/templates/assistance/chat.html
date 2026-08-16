@@ -63,12 +63,26 @@
             cursor: pointer;
             transition: all 0.3s ease;
             white-space: nowrap;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        .hud-btn:hover {
+        .hud-btn:hover:not(:disabled) {
             background: rgba(0, 240, 255, 0.2);
             box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
             color: #ffffff;
+        }
+
+        /* Locked state when JARVIS is offline */
+        .hud-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            border-color: rgba(0, 240, 255, 0.15);
+            box-shadow: none;
+            background: rgba(0, 240, 255, 0.02);
+            color: rgba(0, 240, 255, 0.4);
         }
 
         /* Task Tray (Top-Left) */
@@ -276,7 +290,7 @@
 </head>
 <body>
 
-    <div class="stage-container">
+    <div class="stage-container" id="stageContainer">
         <!-- Top Left Task Overlay -->
         <div class="task-panel" id="taskPanel">
             <div class="task-header">Pending Directives</div>
@@ -296,16 +310,14 @@
             <span id="statusText">Initializing...</span>
         </div>
 
-        <div class="top-nav">
-            <button type="button" class="hud-btn" onclick="toggleTaskPanel()">Tasks</button>
-            <button type="button" class="hud-btn" onclick="clearMemory()">Purge</button>
-            <form action="{% url 'assistance:logout' %}" method="POST" style="display: inline;">
-                {% csrf_token %}
-                <button type="submit" class="hud-btn">Logout</button>
-            </form>
+        <div class="top-nav" id="topNav">
+            <!-- Buttons locked by default until JARVIS activates -->
+            <button type="button" class="hud-btn" id="taskBtn" onclick="toggleTaskPanel(event)" disabled>Tasks</button>
+            <button type="button" class="hud-btn" id="purgeBtn" onclick="clearMemory(event)" disabled>Purge</button>
+            <a href="{% url 'assistance:logout' %}" class="hud-btn">Logout</a>
         </div>
 
-        <div class="core-wrapper" id="coreWrapper" onclick="toggleSession()">
+        <div class="core-wrapper" id="coreWrapper" onclick="toggleSession(event)">
             <div class="outer-ring"></div>
             <div class="inner-ring"></div>
             <div class="center-node"></div>
@@ -320,6 +332,9 @@
         const subtitleBox = document.getElementById('subtitleBox');
         const taskPanel = document.getElementById('taskPanel');
         const taskList = document.getElementById('taskList');
+        const taskBtn = document.getElementById('taskBtn');
+        const purgeBtn = document.getElementById('purgeBtn');
+        const stageContainer = document.getElementById('stageContainer');
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
@@ -349,7 +364,18 @@
             ? "Tap Core to Activate JARVIS" 
             : "Double-Clap or Click Core to Activate";
 
-        function toggleTaskPanel() {
+        // Enables or disables Tasks & Purge controls
+        function updateControlsState(active) {
+            taskBtn.disabled = !active;
+            purgeBtn.disabled = !active;
+            if (!active) {
+                taskPanel.classList.remove('visible');
+            }
+        }
+
+        function toggleTaskPanel(e) {
+            if (e) e.stopPropagation();
+            if (!sessionActive) return;
             taskPanel.classList.toggle('visible');
             refreshTaskList();
         }
@@ -371,7 +397,10 @@
                 .catch(() => {});
         }
 
-        function clearMemory() {
+        function clearMemory(e) {
+            if (e) e.stopPropagation();
+            if (!sessionActive) return;
+
             if (confirm("Purge recent conversation logs?")) {
                 const formData = new FormData();
                 formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
@@ -380,12 +409,14 @@
                     body: formData
                 }).then(() => {
                     subtitleBox.textContent = "Memory buffers cleared.";
-                    setTimeout(() => { subtitleBox.textContent = ""; }, 2500);
+                    setTimeout(() => { 
+                        if (sessionActive) subtitleBox.textContent = ""; 
+                    }, 2500);
                 });
             }
         }
 
-        // --- PRELOAD WAKE AUDIO ON LOAD ---
+        // Preload greeting audio
         function preloadWakeAudio() {
             const formData = new FormData();
             formData.append('message', '__wake_greeting__');
@@ -407,7 +438,7 @@
 
         preloadWakeAudio();
 
-        // --- 1. CLAP DETECTION ---
+        // 1. CLAP DETECTION
         async function initClapDetector() {
             if (isMobile || sessionActive) return;
 
@@ -459,7 +490,7 @@
             }
         }
 
-        // --- 2. ACCENT-OPTIMIZED RECOGNITION ---
+        // 2. SPEECH RECOGNITION
         function setupSpeechRecognition() {
             if (!SpeechRecognition) {
                 statusText.textContent = "Speech Recognition unsupported in this browser.";
@@ -543,12 +574,15 @@
             };
         }
 
-        // --- 3. ZERO-DELAY SESSION WAKE ---
-        function toggleSession() {
+        // 3. ZERO-DELAY SESSION WAKE / TOGGLE
+        function toggleSession(e) {
+            if (e) e.stopPropagation();
+
             if (!sessionActive) {
                 sessionActive = true;
                 isProcessingOrSpeaking = true;
                 accumulatedTranscript = '';
+                updateControlsState(true);
 
                 const rawSalutation = "{{ salutation|escapejs }}";
                 const salutation = decodeHTML(rawSalutation) || "sir";
@@ -611,6 +645,7 @@
             isProcessingOrSpeaking = false;
             accumulatedTranscript = '';
             clearTimeout(speechTimeout);
+            updateControlsState(false);
 
             if (recognition) {
                 try { recognition.abort(); } catch (e) {}
@@ -744,7 +779,9 @@
             if (sessionActive) restartListeningWithDelay();
         }
 
-        window.addEventListener('click', () => {
+        // Global background click initializes mic & clap detector without triggering activation
+        stageContainer.addEventListener('click', (e) => {
+            if (e.target.closest('#topNav')) return;
             if (!isMobile) initClapDetector();
         }, { once: true });
     </script>

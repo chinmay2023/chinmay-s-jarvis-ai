@@ -3,36 +3,39 @@ from pathlib import Path
 import dj_database_url
 from dotenv import load_dotenv
 
-# Define BASE_DIR (points to jarvis_web project root)
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Load .env file
 load_dotenv(BASE_DIR / '.env')
 
-# Security Settings
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-!93n#f=^tvr8xc(fuz!xb((ay5#pe+7gvcy)-qzyuk11v%0o!2')
 
-# DEBUG should default to False in production
-DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
+IS_PRODUCTION = bool(os.getenv('RENDER') or os.getenv('RENDER_EXTERNAL_HOSTNAME'))
+DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't') if IS_PRODUCTION else os.getenv('DEBUG', 'True').lower() in ('true', '1', 't')
 
-# ALLOWED_HOSTS for local and cloud platforms
 ALLOWED_HOSTS = ['*']
 
-# Reverse Proxy & SSL Configuration (Required for Render HTTPS)
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-USE_X_FORWARDED_HOST = True
+if IS_PRODUCTION:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
+    USE_X_FORWARDED_PORT = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
+else:
+    CSRF_COOKIE_SECURE = False
+    SESSION_COOKIE_SECURE = False
 
-# CSRF & Session Cookie Settings for Production HTTPS
-CSRF_COOKIE_SECURE = not DEBUG
-SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_USE_SESSIONS = False
+APPEND_SLASH = True
 
-# CSRF Trusted Origins (Production HTTPS domains)
 CSRF_TRUSTED_ORIGINS = [
     'https://chinmay-s-jarvis-ai.onrender.com',
     'https://*.onrender.com',
-    'http://localhost:8000',
     'http://127.0.0.1:8000',
+    'http://localhost:8000',
+    'http://127.0.0.1',
+    'http://localhost',
 ]
 
 RENDER_EXTERNAL_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME')
@@ -40,7 +43,6 @@ if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
     CSRF_TRUSTED_ORIGINS.append(f'https://{RENDER_EXTERNAL_HOSTNAME}')
 
-# Authentication Redirects
 LOGIN_URL = 'assistance:login'
 LOGIN_REDIRECT_URL = 'assistance:chat'
 LOGOUT_REDIRECT_URL = 'assistance:login'
@@ -57,7 +59,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  # Serves static files efficiently in production
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -85,7 +87,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'jarvis_web.wsgi.application'
 
-# Database Configuration (Uses Neon PostgreSQL if DATABASE_URL exists, else SQLite locally)
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
@@ -105,7 +106,6 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static Files Configuration (Production Ready with WhiteNoise)
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'

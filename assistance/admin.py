@@ -1,64 +1,85 @@
+#jarivs_web/assistance/admin.py
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.contrib.auth.admin import UserAdmin
 from .models import UserProfile, UserMemory, TaskItem, ChatMessage
 
-
-class UserProfileInline(admin.StackedInline):
-    model = UserProfile
-    can_delete = False
-    verbose_name_plural = 'Profile'
-
-
-# Unregister default User model
+# Unregister default User registration
 admin.site.unregister(User)
 
 
-# 1. Custom User Admin (Displays ONLY Regular App Users)
+# 1. Authentication and Authorization -> Users (ONLY Admins & Superusers)
 @admin.register(User)
-class AppUserAdmin(UserAdmin):
-    inlines = (UserProfileInline,)
-    list_display = ('id', 'username', 'email', 'get_gender', 'get_city', 'date_joined')
-    list_filter = ('date_joined',)
+class SuperuserOnlyAdmin(UserAdmin):
+    list_display = ('id', 'username', 'email', 'is_superuser', 'is_staff', 'last_login', 'date_joined')
+    list_filter = ('is_superuser', 'date_joined')
     search_fields = ('username', 'email')
     ordering = ('-date_joined',)
 
     def get_queryset(self, request):
-        # Excludes superusers and admin staff so only regular Jarvis users appear here
+        # Strictly isolates staff and superuser accounts (e.g. jarvis)
         qs = super().get_queryset(request)
-        return qs.filter(is_staff=False, is_superuser=False)
-
-    def get_gender(self, obj):
-        return obj.profile.gender if hasattr(obj, 'profile') else '-'
-    get_gender.short_description = 'Gender'
-
-    def get_city(self, obj):
-        return obj.profile.city if hasattr(obj, 'profile') else '-'
-    get_city.short_description = 'City'
+        return qs.filter(is_staff=True)
 
 
+# 2. Assistance -> User profiles (ONLY Normal Jarvis App Users)
 @admin.register(UserProfile)
-class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'gender', 'city')
-    list_filter = ('gender', 'city')
+class JarvisUserProfileAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'city', 'get_date_joined')
+    list_filter = ('city',)
     search_fields = ('user__username', 'city')
+    ordering = ('-id',)
+    actions = ['delete_selected_users_and_profiles']
+
+    def get_queryset(self, request):
+        # Strictly isolates standard voice assistant users
+        qs = super().get_queryset(request)
+        return qs.filter(user__is_staff=False, user__is_superuser=False)
+
+    def get_date_joined(self, obj):
+        return obj.user.date_joined
+    get_date_joined.short_description = 'Date Joined'
+
+    def delete_model(self, request, obj):
+        # When deleted individually, delete the underlying User account
+        user = obj.user
+        super().delete_model(request, obj)
+        if user:
+            user.delete()
+
+    def delete_queryset(self, request, queryset):
+        # When deleted in bulk, delete all underlying User accounts
+        user_ids = list(queryset.values_list('user_id', flat=True))
+        queryset.delete()
+        User.objects.filter(id__in=user_ids).delete()
 
 
-@admin.register(UserMemory)
-class UserMemoryAdmin(admin.ModelAdmin):
-    list_display = ('user', 'key', 'value', 'created_at')
-    list_filter = ('user', 'created_at')
-    search_fields = ('user__username', 'key', 'value')
-
-
+# 3. Directives / Tasks
 @admin.register(TaskItem)
 class TaskItemAdmin(admin.ModelAdmin):
-    list_display = ('user', 'title', 'is_completed', 'created_at')
+    list_display = ('id', 'user', 'title', 'is_completed', 'created_at')
     list_filter = ('is_completed', 'created_at', 'user')
     search_fields = ('user__username', 'title')
     list_editable = ('is_completed',)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(user__is_staff=False)
 
+
+# 4. Permanent Memory Logs
+@admin.register(UserMemory)
+class UserMemoryAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'key', 'value', 'created_at')
+    list_filter = ('user', 'created_at')
+    search_fields = ('user__username', 'key', 'value')
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(user__is_staff=False)
+
+
+# 5. Conversation Logs
 @admin.register(ChatMessage)
 class ChatMessageAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'role', 'short_content', 'created_at')
@@ -70,3 +91,7 @@ class ChatMessageAdmin(admin.ModelAdmin):
     def short_content(self, obj):
         return obj.content[:65] + "..." if len(obj.content) > 65 else obj.content
     short_content.short_description = "Message Preview"
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(user__is_staff=False)

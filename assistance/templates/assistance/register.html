@@ -1,3 +1,4 @@
+<!--register.html-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,13 +10,13 @@
 
         html, body {
             width: 100vw;
-            height: 100vh;
+            min-height: 100vh;
             background-color: #050811;
             color: #00f0ff;
             display: flex;
             justify-content: center;
             align-items: center;
-            overflow: hidden;
+            padding: 20px 0;
             position: relative;
         }
 
@@ -39,88 +40,76 @@
             box-shadow: 0 0 30px rgba(0, 240, 255, 0.15);
             width: 88%;
             max-width: 380px;
-            padding: 22px 20px;
+            padding: 28px 22px;
             z-index: 1;
             backdrop-filter: blur(10px);
             text-align: center;
-            max-height: 92vh;
-            overflow-y: auto;
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-
-        .card::-webkit-scrollbar {
-            display: none;
         }
 
         .card h2 {
-            font-size: 1.2rem;
+            font-size: 1.25rem;
             letter-spacing: 2px;
             text-transform: uppercase;
             color: #00f0ff;
-            margin-bottom: 14px;
+            margin-bottom: 20px;
             text-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
         }
 
         form {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 12px;
             text-align: left;
         }
 
         label {
-            font-size: 0.72rem;
+            font-size: 0.75rem;
             color: #88c0d0;
             letter-spacing: 1px;
             text-transform: uppercase;
-            margin-bottom: 2px;
+            margin-bottom: 3px;
             display: block;
         }
 
-        input[type="text"], input[type="password"], input[type="email"] {
+        .input-field {
             width: 100%;
-            padding: 8px 10px;
+            padding: 10px 12px;
             background: rgba(5, 8, 17, 0.8);
             border: 1px solid rgba(0, 240, 255, 0.3);
             border-radius: 8px;
             color: #ffffff;
-            font-size: 0.85rem;
+            font-size: 0.88rem;
             outline: none;
             transition: all 0.3s ease;
         }
 
-        input[type="text"]:focus, input[type="password"]:focus, input[type="email"]:focus {
+        .input-field:focus {
             border-color: #00f0ff;
             box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
         }
 
-        .helptext, .helptext ul {
-            font-size: 0.63rem;
-            color: #6c8cae;
-            margin-top: 2px;
-            line-height: 1.2;
-            list-style-type: none;
-            padding-left: 0;
+        .error-banner {
+            color: #ff4d4d;
+            font-size: 0.75rem;
+            margin-bottom: 6px;
+            line-height: 1.4;
         }
 
-        .errorlist {
+        .field-error {
             color: #ff4d4d;
-            font-size: 0.7rem;
-            list-style: none;
-            margin-bottom: 2px;
-            padding-left: 0;
+            font-size: 0.72rem;
+            margin-top: 2px;
         }
 
         .btn-submit {
-            margin-top: 6px;
+            margin-top: 8px;
             width: 100%;
-            padding: 10px;
+            padding: 11px;
             background: #00f0ff;
             border: none;
             border-radius: 8px;
             color: #050811;
-            font-size: 0.85rem;
+            font-size: 0.88rem;
             font-weight: 700;
             letter-spacing: 1px;
             text-transform: uppercase;
@@ -136,9 +125,9 @@
 
         .auth-link {
             display: inline-block;
-            margin-top: 12px;
+            margin-top: 16px;
             color: #88c0d0;
-            font-size: 0.75rem;
+            font-size: 0.78rem;
             text-decoration: none;
             transition: color 0.3s ease;
         }
@@ -152,25 +141,51 @@
 <body>
 
     <div class="card">
-        <h2>Join J.A.R.V.I.S.</h2>
+        <h2>Create Profile</h2>
         
-        <form method="POST" action="{% url 'assistance:register' %}">
+        <form method="POST" action="">
             {% csrf_token %}
-            {% for field in form %}
-                <div>
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field.errors }}
-                    {{ field }}
-                    {% if field.help_text %}
-                        <div class="helptext">{{ field.help_text|safe }}</div>
-                    {% endif %}
-                </div>
-            {% endfor %}
 
-            <button type="submit" class="btn-submit">Create Account</button>
+            {% if error_message and not form.errors %}
+                <div class="error-banner">{{ error_message }}</div>
+            {% endif %}
+
+            {% if form.non_field_errors %}
+                <div class="error-banner">
+                    {% for error in form.non_field_errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <div>
+                <label for="id_username">Username</label>
+                <input type="text" name="username" id="id_username" class="input-field" placeholder="Enter username" value="{{ form.username.value|default:'' }}" required autofocus autocomplete="username">
+                {% if form.username.errors %}
+                    <div class="field-error">{{ form.username.errors.0 }}</div>
+                {% endif %}
+            </div>
+
+            <div>
+                <label for="id_password1">Password</label>
+                <input type="password" name="password1" id="id_password1" class="input-field" placeholder="Enter password" required autocomplete="new-password">
+                {% if form.password1.errors %}
+                    <div class="field-error">{{ form.password1.errors.0 }}</div>
+                {% endif %}
+            </div>
+
+            <div>
+                <label for="id_password2">Confirm Password</label>
+                <input type="password" name="password2" id="id_password2" class="input-field" placeholder="Confirm password" required autocomplete="new-password">
+                {% if form.password2.errors %}
+                    <div class="field-error">{{ form.password2.errors.0 }}</div>
+                {% endif %}
+            </div>
+
+            <button type="submit" class="btn-submit">Register</button>
         </form>
 
-        <a href="{% url 'assistance:login' %}" class="auth-link">Already have an account? Login</a>
+        <a href="{% url 'assistance:login' %}" class="auth-link">Already registered? Login</a>
     </div>
 
 </body>
