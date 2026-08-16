@@ -10,16 +10,23 @@ class UserProfileInline(admin.StackedInline):
     verbose_name_plural = 'Profile'
 
 
-# Re-register UserAdmin with inline profile
+# Unregister default User model
 admin.site.unregister(User)
 
+
+# 1. Custom User Admin (Displays ONLY Regular App Users)
 @admin.register(User)
-class CustomUserAdmin(UserAdmin):
+class AppUserAdmin(UserAdmin):
     inlines = (UserProfileInline,)
-    list_display = ('id', 'username', 'email', 'get_gender', 'get_city', 'date_joined', 'is_staff')
-    list_filter = ('is_staff', 'is_superuser', 'date_joined')
+    list_display = ('id', 'username', 'email', 'get_gender', 'get_city', 'date_joined')
+    list_filter = ('date_joined',)
     search_fields = ('username', 'email')
     ordering = ('-date_joined',)
+
+    def get_queryset(self, request):
+        # Excludes superusers and admin staff so only regular Jarvis users appear here
+        qs = super().get_queryset(request)
+        return qs.filter(is_staff=False, is_superuser=False)
 
     def get_gender(self, obj):
         return obj.profile.gender if hasattr(obj, 'profile') else '-'
