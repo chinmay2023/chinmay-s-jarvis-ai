@@ -16,13 +16,19 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-!93n#f=^tvr8xc(fuz!xb((ay5
 DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
 
 # ALLOWED_HOSTS for local and cloud platforms
+# ALLOWED_HOSTS for local and cloud platforms
 ALLOWED_HOSTS = ['*']
 
-# CSRF Trusted Origins (Essential for HTTPS domains on Render/Railway)
+# CSRF Trusted Origins (Production HTTPS domains)
+CSRF_TRUSTED_ORIGINS = [
+    'https://chinmay-s-jarvis-ai.onrender.com',
+    'https://*.onrender.com',
+]
+
 RENDER_EXTERNAL_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
-    CSRF_TRUSTED_ORIGINS = [f'https://{RENDER_EXTERNAL_HOSTNAME}']
+    CSRF_TRUSTED_ORIGINS.append(f'https://{RENDER_EXTERNAL_HOSTNAME}')
 
 # Authentication Redirects
 LOGIN_URL = 'assistance:login'
