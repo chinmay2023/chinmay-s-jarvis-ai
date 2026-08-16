@@ -91,7 +91,7 @@
             top: 20px;
             left: 20px;
             z-index: 10;
-            background: rgba(5, 8, 17, 0.75);
+            background: rgba(5, 8, 17, 0.85);
             border: 1px solid rgba(0, 240, 255, 0.2);
             padding: 10px 14px;
             border-radius: 10px;
@@ -244,47 +244,53 @@
             100% { transform: scale(1.12); }
         }
 
+        /* Responsive Mobile Layout Fix */
         @media (max-width: 768px) {
             .top-nav {
-                top: 12px;
-                right: 12px;
+                top: 14px;
+                right: 14px;
+                gap: 6px;
             }
 
             .task-panel {
-                top: 60px;
-                left: 12px;
-                max-width: 200px;
+                top: 90px;
+                left: 14px;
+                max-width: 220px;
             }
 
+            /* Moves status indicator to Row 2 below top action buttons */
             .header-status {
-                top: 18px;
-                left: 15px;
-                transform: none;
-                font-size: 0.65rem;
-                letter-spacing: 0.5px;
-                max-width: calc(100vw - 190px);
+                top: 56px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 0.72rem;
+                letter-spacing: 0.8px;
+                width: 90%;
+                justify-content: center;
             }
 
             #statusText {
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                display: block;
+                text-align: center;
             }
 
             .hud-btn {
-                padding: 6px 10px;
-                font-size: 0.6rem;
+                padding: 6px 11px;
+                font-size: 0.65rem;
+                letter-spacing: 1px;
             }
 
             .core-wrapper {
-                width: 200px;
-                height: 200px;
+                width: 210px;
+                height: 210px;
             }
 
             .subtitle-box {
                 bottom: 80px;
                 font-size: 0.85rem;
+                line-height: 1.4;
             }
         }
     </style>
@@ -306,15 +312,17 @@
             </ul>
         </div>
 
-        <div class="header-status">
-            <div class="status-dot" id="statusDot"></div>
-            <span id="statusText">Initializing...</span>
-        </div>
-
+        <!-- Top Right Actions -->
         <div class="top-nav" id="topNav">
             <button type="button" class="hud-btn" id="taskBtn" onclick="toggleTaskPanel(event)" disabled>Tasks</button>
             <button type="button" class="hud-btn" id="purgeBtn" onclick="clearMemory(event)" disabled>Purge</button>
             <a href="{% url 'assistance:logout' %}" class="hud-btn">Logout</a>
+        </div>
+
+        <!-- Centered Status Indicator -->
+        <div class="header-status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Initializing...</span>
         </div>
 
         <div class="core-wrapper" id="coreWrapper" onclick="toggleSession(event)">
@@ -344,7 +352,7 @@
         let accumulatedTranscript = '';
         let speechTimeout = null;
 
-        // Persistent single audio element for mobile browser autoplay authorization
+        // Single persistent Audio object for mobile autoplay
         const jarvisAudio = new Audio();
         let isAudioUnlocked = false;
 
