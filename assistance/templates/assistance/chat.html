@@ -169,6 +169,7 @@
             align-items: center;
             cursor: pointer;
             z-index: 2;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .outer-ring {
@@ -311,7 +312,6 @@
         </div>
 
         <div class="top-nav" id="topNav">
-            <!-- Buttons locked by default until JARVIS activates -->
             <button type="button" class="hud-btn" id="taskBtn" onclick="toggleTaskPanel(event)" disabled>Tasks</button>
             <button type="button" class="hud-btn" id="purgeBtn" onclick="clearMemory(event)" disabled>Purge</button>
             <a href="{% url 'assistance:logout' %}" class="hud-btn">Logout</a>
@@ -343,8 +343,10 @@
 
         let accumulatedTranscript = '';
         let speechTimeout = null;
-        let currentAudio = null;
-        let preloadedWakeAudio = null;
+
+        // Persistent single audio element for mobile browser autoplay authorization
+        const jarvisAudio = new Audio();
+        let isAudioUnlocked = false;
 
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
@@ -363,6 +365,20 @@
         statusText.textContent = isMobile 
             ? "Tap Core to Activate JARVIS" 
             : "Double-Clap or Click Core to Activate";
+
+        // Mobile Browser AudioContext & Autoplay Unblocker
+        function unlockAudioEngine() {
+            if (isAudioUnlocked) return;
+            jarvisAudio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+            jarvisAudio.play().then(() => {
+                jarvisAudio.pause();
+                isAudioUnlocked = true;
+                console.log("🔊 Mobile Audio Autoplay Unlocked");
+            }).catch(() => {});
+        }
+
+        document.addEventListener('touchstart', unlockAudioEngine, { once: true });
+        document.addEventListener('click', unlockAudioEngine, { once: true });
 
         // Enables or disables Tasks & Purge controls
         function updateControlsState(active) {
@@ -415,28 +431,6 @@
                 });
             }
         }
-
-        // Preload greeting audio
-        function preloadWakeAudio() {
-            const formData = new FormData();
-            formData.append('message', '__wake_greeting__');
-            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
-
-            fetch("{% url 'assistance:jarvis_api' %}", {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.audio) {
-                    preloadedWakeAudio = new Audio("data:audio/mp3;base64," + data.audio);
-                    preloadedWakeAudio.preload = "auto";
-                }
-            })
-            .catch(() => {});
-        }
-
-        preloadWakeAudio();
 
         // 1. CLAP DETECTION
         async function initClapDetector() {
@@ -539,7 +533,7 @@
 
                 clearTimeout(speechTimeout);
                 if (liveText.length > 1) {
-                    const waitTime = hasFinal ? 900 : 1500;
+                    const waitTime = hasFinal ? 850 : 1400;
                     speechTimeout = setTimeout(() => {
                         if (sessionActive && !isProcessingOrSpeaking && accumulatedTranscript.trim().length > 1) {
                             const query = accumulatedTranscript.trim();
@@ -577,6 +571,7 @@
         // 3. ZERO-DELAY SESSION WAKE / TOGGLE
         function toggleSession(e) {
             if (e) e.stopPropagation();
+            unlockAudioEngine();
 
             if (!sessionActive) {
                 sessionActive = true;
@@ -593,25 +588,7 @@
                 statusText.textContent = "JARVIS Transmitting...";
 
                 setupSpeechRecognition();
-
-                if (preloadedWakeAudio) {
-                    currentAudio = preloadedWakeAudio;
-                    currentAudio.currentTime = 0;
-                    currentAudio.play().catch(() => {});
-
-                    currentAudio.onended = () => {
-                        currentAudio = null;
-                        setTimeout(() => {
-                            isProcessingOrSpeaking = false;
-                            if (sessionActive) {
-                                resetUI();
-                                startListening();
-                            }
-                        }, 120);
-                    };
-                } else {
-                    fetchWakeAudio(wakeGreeting);
-                }
+                fetchWakeAudio(wakeGreeting);
             } else {
                 shutdownSession();
             }
@@ -651,10 +628,8 @@
                 try { recognition.abort(); } catch (e) {}
             }
 
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio.currentTime = 0;
-            }
+            jarvisAudio.pause();
+            jarvisAudio.currentTime = 0;
 
             resetUI();
             statusText.textContent = isMobile 
@@ -736,22 +711,18 @@
             const cleanText = decodeHTML(text).replace(/[*_~#`]/g, '').trim();
 
             if (base64Audio) {
-                if (currentAudio) {
-                    currentAudio.pause();
-                    currentAudio.currentTime = 0;
-                }
-
-                currentAudio = new Audio("data:audio/mp3;base64," + base64Audio);
+                jarvisAudio.pause();
+                jarvisAudio.src = "data:audio/mp3;base64," + base64Audio;
+                jarvisAudio.currentTime = 0;
                 
                 coreWrapper.className = 'core-wrapper speaking';
                 statusText.textContent = isShutdown ? "JARVIS Shutting Down..." : "JARVIS Transmitting...";
 
-                currentAudio.play().catch(e => {
-                    console.warn("Audio playback issue:", e);
+                jarvisAudio.play().catch(e => {
+                    console.warn("Mobile audio playback issue:", e);
                 });
 
-                currentAudio.onended = () => {
-                    currentAudio = null;
+                jarvisAudio.onended = () => {
                     if (isShutdown) {
                         shutdownSession();
                     } else {
@@ -767,8 +738,7 @@
                     }
                 };
 
-                currentAudio.onerror = () => {
-                    currentAudio = null;
+                jarvisAudio.onerror = () => {
                     isProcessingOrSpeaking = false;
                     if (sessionActive) restartListeningWithDelay();
                 };
