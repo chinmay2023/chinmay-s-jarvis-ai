@@ -7,12 +7,13 @@ import asyncio
 import requests
 import edge_tts
 import wikipediaapi
+import concurrent.futures
 from django.shortcuts import render, redirect
 from django.contrib.auth.models import User
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth import login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt
 from django.http import JsonResponse
 from openai import OpenAI
 from duckduckgo_search import DDGS
@@ -46,73 +47,94 @@ DEFAULT_VOICE = "en-US-ChristopherNeural"
 DEFAULT_PITCH = "-14Hz"
 DEFAULT_RATE = "+4%"
 
-# Neural Voice Model Mapping for Indian Scripts (Deep-tuned to match JARVIS's tone)
+# Neural Voice Model Mapping for Indian Scripts
 INDIAN_VOICE_MAP = [
     # Bengali
-    (r'[\u0980-\u09FF]', 'bn-IN-BashkarNeural', '-8Hz', '+3%'),
+    (r'[\u0980-\u09FF]', 'bn-IN-BashkarNeural', '+0Hz', '+0%'),
     # Tamil
-    (r'[\u0B80-\u0BFF]', 'ta-IN-ValluvarNeural', '-8Hz', '+3%'),
+    (r'[\u0B80-\u0BFF]', 'ta-IN-ValluvarNeural', '+0Hz', '+0%'),
     # Telugu
-    (r'[\u0C00-\u0C7F]', 'te-IN-MohanNeural', '-8Hz', '+3%'),
+    (r'[\u0C00-\u0C7F]', 'te-IN-MohanNeural', '+0Hz', '+0%'),
     # Kannada
-    (r'[\u0C80-\u0CFF]', 'kn-IN-GaganNeural', '-8Hz', '+3%'),
+    (r'[\u0C80-\u0CFF]', 'kn-IN-GaganNeural', '+0Hz', '+0%'),
     # Malayalam
-    (r'[\u0D00-\u0D7F]', 'ml-IN-MidhunNeural', '-8Hz', '+3%'),
+    (r'[\u0D00-\u0D7F]', 'ml-IN-MidhunNeural', '+0Hz', '+0%'),
     # Gujarati
-    (r'[\u0A80-\u0AFF]', 'gu-IN-NiranjanNeural', '-8Hz', '+3%'),
+    (r'[\u0A80-\u0AFF]', 'gu-IN-NiranjanNeural', '+0Hz', '+0%'),
     # Punjabi (Gurmukhi)
-    (r'[\u0A00-\u0A7F]', 'pa-IN-OjasNeural', '-8Hz', '+3%'),
+    (r'[\u0A00-\u0A7F]', 'pa-IN-OjasNeural', '+0Hz', '+0%'),
     # Urdu (Perso-Arabic)
-    (r'[\u0600-\u06FF]', 'ur-IN-SalmanNeural', '-8Hz', '+3%'),
-    # Marathi (Devanagari)
-    (r'[\u0900-\u097F]', 'mr-IN-ManoharNeural', '-8Hz', '+3%'),
+    (r'[\u0600-\u06FF]', 'ur-IN-SalmanNeural', '+0Hz', '+0%'),
+    # Marathi / Hindi (Devanagari)
+    (r'[\u0900-\u097F]', 'mr-IN-ManoharNeural', '+0Hz', '+0%'),
 ]
 
 # In-memory cache for wake audio
 WAKE_AUDIO_CACHE = {}
 
+# ThreadPoolExecutor to prevent asyncio loop collisions across Django workers
+AUDIO_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
 
 def get_voice_parameters(text):
-    """Detects native script and assigns the appropriate tuned neural voice."""
+    """Detects native script or phonetic cues and assigns the appropriate tuned neural voice."""
     for pattern, voice, pitch, rate in INDIAN_VOICE_MAP:
         if re.search(pattern, text):
             return voice, pitch, rate
+
+    # Phonetic Latin cues for Marathi / Hindi
+    clean_lower = text.lower()
+    marathi_latin_cues = ["ahe", "kaay", "kasa", "kashi", "bolu", "vichar", "namaskar", "aapan", "sang", "aahe", "tuzi", "tuzhe", "mala", "tula", "karu", "karte", "zala", "zali", "kiti", "kuthe", "kashala", "teva"]
+    words = clean_lower.split()
+    if any(cue in words for cue in marathi_latin_cues):
+        return 'mr-IN-ManoharNeural', '+0Hz', '+0%'
+
+    hindi_latin_cues = ["hai", "kya", "kaise", "kaisa", "bhai", "karo", "theek", "bolo", "batao", "mujhe", "tum", "aap", "achha"]
+    if any(cue in words for cue in hindi_latin_cues):
+        return 'hi-IN-MadhurNeural', '+0Hz', '+0%'
+
     return DEFAULT_VOICE, DEFAULT_PITCH, DEFAULT_RATE
 
 
-async def generate_voice_base64(text):
-    """Generates low-latency Base64 audio using the signature JARVIS voice across all languages."""
+async def _synthesize_edge_tts(clean_text, voice, rate, pitch):
+    """Internal coroutine for stream synthesis."""
+    communicate = edge_tts.Communicate(clean_text, voice, rate=rate, pitch=pitch)
+    audio_chunks = []
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_chunks.append(chunk["data"])
+    return b"".join(audio_chunks) if audio_chunks else None
+
+
+def generate_voice_base64_sync(text):
+    """Safe thread-isolated runner that prevents event loop crashes on mobile and WSGI environments."""
     if not text:
         return None
 
     clean_text = re.sub(r'<function.*?</function>', '', text, flags=re.DOTALL)
-    clean_text = re.sub(r'[{}\[\]*#`_~]', '', clean_text).strip()
+    clean_text = re.sub(r'[{}\[\]*#`_~<>\\]', '', clean_text).strip()
 
     if not clean_text:
         return None
 
     voice, pitch, rate = get_voice_parameters(clean_text)
 
-    try:
-        communicate = edge_tts.Communicate(
-            clean_text,
-            voice,
-            rate=rate,
-            pitch=pitch
-        )
-        audio_chunks = []
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_chunks.append(chunk["data"])
-
-        if not audio_chunks:
+    def _run_in_new_loop():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            raw_audio = loop.run_until_complete(_synthesize_edge_tts(clean_text, voice, rate, pitch))
+            if raw_audio:
+                return base64.b64encode(raw_audio).decode('utf-8')
             return None
+        except Exception as e:
+            print(f"⚠️ Audio Synthesis Warning: {e}")
+            return None
+        finally:
+            loop.close()
 
-        audio_data = b"".join(audio_chunks)
-        return base64.b64encode(audio_data).decode('utf-8')
-    except Exception as e:
-        print(f"⚠️ Edge-TTS Generation Error: {e}")
-        return None
+    future = AUDIO_POOL.submit(_run_in_new_loop)
+    return future.result()
 
 
 def get_user_salutation(user):
@@ -279,10 +301,13 @@ def register_view(request):
     return render(request, 'assistance/register.html', {'form': form, 'error_message': error_message})
 
 
+@csrf_exempt
 def logout_view(request):
     """Safely terminates user session across both GET and POST requests."""
     auth_logout(request)
-    return redirect('assistance:login')
+    response = redirect('assistance:login')
+    response.delete_cookie('sessionid', path='/')
+    return response
 
 
 @ensure_csrf_cookie
@@ -316,7 +341,7 @@ def get_tasks_api(request):
 
 @login_required(login_url='assistance:login')
 def jarvis_api(request):
-    """Synchronous Django endpoint wrapping async edge-tts generation cleanly."""
+    """Voice assistant API endpoint with thread-isolated neural TTS."""
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid request method'}, status=405)
 
@@ -336,7 +361,7 @@ def jarvis_api(request):
     if cmd == "__wake_greeting__":
         wake_reply = f"Online and ready, {salutation}."
         if salutation not in WAKE_AUDIO_CACHE:
-            WAKE_AUDIO_CACHE[salutation] = asyncio.run(generate_voice_base64(wake_reply))
+            WAKE_AUDIO_CACHE[salutation] = generate_voice_base64_sync(wake_reply)
         return JsonResponse({'reply': wake_reply, 'audio': WAKE_AUDIO_CACHE[salutation]})
 
     # Dynamic Voice Salutation Override
@@ -366,7 +391,7 @@ def jarvis_api(request):
 
         ChatMessage.objects.create(user=request.user, role='user', content=user_message)
         ChatMessage.objects.create(user=request.user, role='assistant', content=creator_reply)
-        audio_base64 = asyncio.run(generate_voice_base64(creator_reply))
+        audio_base64 = generate_voice_base64_sync(creator_reply)
         return JsonResponse({'reply': creator_reply, 'audio': audio_base64})
 
     # Fast Shutdown
@@ -375,7 +400,7 @@ def jarvis_api(request):
         reply = f"Shutting down systems. Have a good day, {salutation}."
         ChatMessage.objects.create(user=request.user, role='user', content=user_message)
         ChatMessage.objects.create(user=request.user, role='assistant', content=reply)
-        audio_base64 = asyncio.run(generate_voice_base64(reply))
+        audio_base64 = generate_voice_base64_sync(reply)
         return JsonResponse({'reply': reply, 'audio': audio_base64, 'shutdown': True})
 
     # Direct Tasks Handling
@@ -383,7 +408,7 @@ def jarvis_api(request):
     if task_response:
         ChatMessage.objects.create(user=request.user, role='user', content=user_message)
         ChatMessage.objects.create(user=request.user, role='assistant', content=task_response)
-        audio_base64 = asyncio.run(generate_voice_base64(task_response))
+        audio_base64 = generate_voice_base64_sync(task_response)
         return JsonResponse({'reply': task_response, 'audio': audio_base64})
 
     # Direct Memory Handling
@@ -391,7 +416,7 @@ def jarvis_api(request):
     if memory_response:
         ChatMessage.objects.create(user=request.user, role='user', content=user_message)
         ChatMessage.objects.create(user=request.user, role='assistant', content=memory_response)
-        audio_base64 = asyncio.run(generate_voice_base64(memory_response))
+        audio_base64 = generate_voice_base64_sync(memory_response)
         return JsonResponse({'reply': memory_response, 'audio': audio_base64})
 
     # Save User Chat Message
@@ -465,12 +490,12 @@ def jarvis_api(request):
         reply = re.sub(r'\b(साहेब|साहेबजी|जनाब|श्रीमान|महोदय)\b', 'सर', reply)
 
         ChatMessage.objects.create(user=request.user, role='assistant', content=reply)
-        audio_base64 = asyncio.run(generate_voice_base64(reply))
+        audio_base64 = generate_voice_base64_sync(reply)
 
         return JsonResponse({'reply': reply, 'audio': audio_base64})
 
     except Exception as e:
         print(f"❌ Groq API Error: {str(e)}")
         fallback_reply = f"My neural link experienced a slight glitch, {salutation}. Please try speaking again."
-        audio_base64 = asyncio.run(generate_voice_base64(fallback_reply))
+        audio_base64 = generate_voice_base64_sync(fallback_reply)
         return JsonResponse({'reply': fallback_reply, 'audio': audio_base64})
