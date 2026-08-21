@@ -17,8 +17,11 @@ Including another URLconf
 #jarvis_web/jarvis_web/urls.py
 from django.contrib import admin
 from django.urls import path, include
+from django.views.generic.base import RedirectView
+from django.templatetags.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('assistance.urls')),  # Mounts assistance at site root
+    path('favicon.ico', RedirectView.as_view(url=static('assistance/image/Jarvis.jpg'), permanent=True)),
 ]

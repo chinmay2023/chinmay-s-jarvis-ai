@@ -7,7 +7,6 @@ import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Auto-load .env from root and parent directories
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -56,22 +55,21 @@ tavily_client = TavilyClient(api_key=tavily_api_key) if (TavilyClient and tavily
 ACTIVE_GROQ_MODEL = "openai/gpt-oss-120b"
 FAST_FALLBACK_MODEL = "openai/gpt-oss-20b"
 
-# Default Signature JARVIS Voice
+# Signature English JARVIS Voice
 DEFAULT_VOICE = "en-US-ChristopherNeural"
 DEFAULT_PITCH = "-10Hz"
 DEFAULT_RATE = "-6%"
 
-# Neural Voice Model Mapping for Indian Scripts
+# Deep Pacing & Pitch Configuration for Native Indian Languages
 INDIAN_VOICE_MAP = [
-    (r'[\u0980-\u09FF]', 'bn-IN-BashkarNeural', '+0Hz', '+0%'),
-    (r'[\u0B80-\u0BFF]', 'ta-IN-ValluvarNeural', '+0Hz', '+0%'),
-    (r'[\u0C00-\u0C7F]', 'te-IN-MohanNeural', '+0Hz', '+0%'),
-    (r'[\u0C80-\u0CFF]', 'kn-IN-GaganNeural', '+0Hz', '+0%'),
-    (r'[\u0D00-\u0D7F]', 'ml-IN-MidhunNeural', '+0Hz', '+0%'),
-    (r'[\u0A80-\u0AFF]', 'gu-IN-NiranjanNeural', '+0Hz', '+0%'),
-    (r'[\u0A00-\u0A7F]', 'pa-IN-OjasNeural', '+0Hz', '+0%'),
-    (r'[\u0600-\u06FF]', 'ur-IN-SalmanNeural', '+0Hz', '+0%'),
-    (r'[\u0900-\u097F]', 'mr-IN-ManoharNeural', '+0Hz', '+0%'),
+    (r'[\u0980-\u09FF]', 'bn-IN-BashkarNeural', '-10Hz', '-4%'),  # Bengali
+    (r'[\u0B80-\u0BFF]', 'ta-IN-ValluvarNeural', '-10Hz', '-4%'),  # Tamil
+    (r'[\u0C00-\u0C7F]', 'te-IN-MohanNeural', '-10Hz', '-4%'),    # Telugu
+    (r'[\u0C80-\u0CFF]', 'kn-IN-GaganNeural', '-10Hz', '-4%'),    # Kannada
+    (r'[\u0D00-\u0D7F]', 'ml-IN-MidhunNeural', '-10Hz', '-4%'),   # Malayalam
+    (r'[\u0A80-\u0AFF]', 'gu-IN-NiranjanNeural', '-10Hz', '-4%'),  # Gujarati
+    (r'[\u0A00-\u0A7F]', 'pa-IN-OjasNeural', '-10Hz', '-4%'),      # Punjabi
+    (r'[\u0600-\u06FF]', 'ur-IN-SalmanNeural', '-10Hz', '-4%'),    # Urdu
 ]
 
 WAKE_AUDIO_CACHE = {}
@@ -79,21 +77,35 @@ AUDIO_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 
 def get_voice_parameters(text):
-    """Detects native script or phonetic cues and assigns the appropriate tuned neural voice."""
+    """Accurately routes Marathi, Hindi, and English to deep JARVIS neural voices."""
+    clean_lower = text.lower()
+
+    # 1. Other Indic Scripts
     for pattern, voice, pitch, rate in INDIAN_VOICE_MAP:
         if re.search(pattern, text):
             return voice, pitch, rate
 
-    clean_lower = text.lower()
-    marathi_latin_cues = ["ahe", "kaay", "kasa", "kashi", "bolu", "vichar", "namaskar", "aapan", "sang", "aahe", "tuzi", "tuzhe", "mala", "tula", "karu", "karte", "zala", "zali", "kiti", "kuthe", "kashala", "teva"]
-    words = clean_lower.split()
-    if any(cue in words for cue in marathi_latin_cues):
-        return 'mr-IN-ManoharNeural', '+0Hz', '+0%'
+    # 2. Marathi Detection -> Deep Marathi
+    marathi_cues = [
+        "आहे", "काय", "कसा", "कशी", "बोला", "सांगा", "माझं", "तुझं", "मला", "तुला", "झाला", "झाली", "नाही", "होय", "कसं", "कशा",
+        "ahe", "aahe", "kaay", "kasa", "kashi", "bolu", "vichar", "namaskar", "aapan", "sang", "tuzi", "tuzhe", "mala", "tula", "zala", "zali", "kuthe", "kashala"
+    ]
+    if any(cue in clean_lower for cue in marathi_cues) or any(cue in text for cue in ["आहे", "काय", "कसा", "कशी", "नाही", "सांगा", "माझं"]):
+        return 'mr-IN-ManoharNeural', '-14Hz', '-5%'
 
-    hindi_latin_cues = ["hai", "kya", "kaise", "kaisa", "bhai", "karo", "theek", "bolo", "batao", "mujhe", "tum", "aap", "achha"]
-    if any(cue in words for cue in hindi_latin_cues):
-        return 'hi-IN-MadhurNeural', '+0Hz', '+0%'
+    # 3. Hindi Detection -> Deep Hindi
+    hindi_cues = [
+        "है", "क्या", "कैसे", "कैसा", "बताओ", "मुझे", "तुम", "आप", "नमस्ते", "हाँ", "नहीं", "करो", "ठीक", "हो",
+        "hai", "kya", "kaise", "kaisa", "bhai", "karo", "theek", "bolo", "batao", "mujhe", "tum", "aap", "achha"
+    ]
+    if any(cue in clean_lower for cue in hindi_cues) or any(cue in text for cue in ["है", "क्या", "कैसे", "बताओ", "नमस्ते", "हाँ"]):
+        return 'hi-IN-MadhurNeural', '-12Hz', '-4%'
 
+    # 4. General Devanagari fallback -> Deep Hindi
+    if re.search(r'[\u0900-\u097F]', text):
+        return 'hi-IN-MadhurNeural', '-12Hz', '-4%'
+
+    # 5. Default English -> ChristopherNeural
     return DEFAULT_VOICE, DEFAULT_PITCH, DEFAULT_RATE
 
 
@@ -150,7 +162,7 @@ def get_user_salutation(user):
 def execute_web_search(query, default_city="Wardha"):
     clean_q = query.lower().strip()
 
-    # 1. Weather
+    # Weather
     if any(w in clean_q for w in ["weather", "temperature", "mausam", "havaman", "forecast", "climate"]):
         try:
             city = re.sub(r'(what is the|how is the|tell me the|current|today|in|weather|temperature|forecast|of|\?)', '', clean_q).strip()
@@ -165,11 +177,11 @@ def execute_web_search(query, default_city="Wardha"):
                 weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
                 w_data = requests.get(weather_url, timeout=3).json().get('current_weather', {})
                 if w_data:
-                    return f"Current live weather in {name}, {country}: Temperature is {w_data.get('temperature')}°C with wind speed around {w_data.get('windspeed')} km/h."
+                    return f"Live weather in {name}, {country}: Temperature is {w_data.get('temperature')}°C with wind speed around {w_data.get('windspeed')} km/h."
         except Exception as e:
             print(f"⚠️ Weather API Notice: {e}")
 
-    # 2. Tavily AI Real-Time Search
+    # Tavily Search
     if tavily_client:
         try:
             search_context = tavily_client.get_search_context(
@@ -182,7 +194,7 @@ def execute_web_search(query, default_city="Wardha"):
         except Exception as e:
             print(f"⚠️ Tavily Search Notice: {e}")
 
-    # 3. DuckDuckGo Search Fallback
+    # DuckDuckGo Fallback
     if DDGS:
         try:
             results = list(DDGS().text(query, max_results=3))
@@ -192,7 +204,7 @@ def execute_web_search(query, default_city="Wardha"):
         except Exception as e:
             print(f"⚠️ DuckDuckGo Notice: {e}")
 
-    # 4. Wikipedia Search Fallback
+    # Wikipedia Fallback
     try:
         clean_topic = re.sub(r'^(who is|what is|tell me about|explain|define|where is|founder of)\s+', '', clean_q).strip('?')
         if len(clean_topic) > 2:
@@ -203,7 +215,7 @@ def execute_web_search(query, default_city="Wardha"):
     except Exception as e:
         print(f"⚠️ Wikipedia Notice: {e}")
 
-    return "No verified live information found on this topic."
+    return "No verified real-time information found on this topic."
 
 
 TOOLS = [
@@ -211,7 +223,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "manage_tasks",
-            "description": "Adds, lists, or clears user directives/tasks in the database. When action is 'add', ALWAYS extract a concise, clean action title (2 to 6 words max) without speech corrections or filler words.",
+            "description": "Adds, lists, or clears user directives/tasks in the database. When action is 'add', extract a clean, concise directive title (2-6 words max).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -222,7 +234,7 @@ TOOLS = [
                     },
                     "task_title": {
                         "type": "string",
-                        "description": "Clean, summarized directive title (e.g., 'Meditate in 5 minutes', 'Buy groceries', 'Call Tony Stark')."
+                        "description": "Clean, concise directive title (e.g. 'Meditate in 5 minutes', 'Buy groceries')."
                     }
                 },
                 "required": ["action"]
@@ -233,13 +245,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_world_information",
-            "description": "Searches the live internet for current events, news, songs, music, live sports, real-time weather, stock prices, definitions, facts, people, or any world knowledge.",
+            "description": "Searches the live internet for current events, news, songs, definitions, sports, weather, stock prices, facts, or people.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The exact search query to look up."
+                        "description": "The exact search query to look up on the live web."
                     }
                 },
                 "required": ["query"]
@@ -345,8 +357,8 @@ def jarvis_api(request):
 
     cmd = user_message.lower()
 
-    # Pre-Cached Wake Audio
-    if cmd == "__wake_greeting__":
+    # Double-Clap & Wake Greeting Handler
+    if cmd in ["__wake_greeting__", "__clap_trigger__"]:
         wake_reply = f"Online and ready, {salutation}."
         if salutation not in WAKE_AUDIO_CACHE:
             WAKE_AUDIO_CACHE[salutation] = generate_voice_base64_sync(wake_reply)
@@ -381,7 +393,7 @@ def jarvis_api(request):
 
     ChatMessage.objects.create(user=request.user, role='user', content=user_message)
 
-    # Memories & History
+    # Context & History
     memories = UserMemory.objects.filter(user=request.user).order_by('-created_at')[:4]
     memory_context = "\n".join([f"- {m.value}" for m in memories]) if memories else "None"
 
@@ -391,16 +403,19 @@ def jarvis_api(request):
     system_instruction = {
         "role": "system",
         "content": (
-            f"You are J.A.R.V.I.S., a sophisticated, charismatic AI assistant inspired by Tony Stark's JARVIS. "
+            f"You are J.A.R.V.I.S., an articulate, highly capable, witty AI assistant inspired by Tony Stark's JARVIS. "
             f"Always address the user exclusively as '{salutation}' or 'सर'/'मॅडम'. "
             f"NEVER use honorifics like 'साहेब', 'साहेबजी', 'जनाब', 'श्रीमान', 'महोदय'. "
             f"The user's account name is '{user_name}'. Only mention their actual name if they specifically ask 'What is my name?' or 'Who am I?'. "
-            f"Known facts about this user:\n{memory_context}\n"
-            f"Speak like a witty, intelligent assistant: natural, articulate, and punchy (1-2 sentences max). "
-            f"By default, speak in English. If the user speaks or asks in Hindi, Marathi, Bengali, Tamil, Telugu, Kannada, Malayalam, Gujarati, or Punjabi, respond fluently in that language while still addressing them as '{salutation}' or 'सर'/'मॅडम'. "
-            f"If the user asks to add, create, schedule, note, or remind them of a task/directive, ALWAYS call the 'manage_tasks' tool with a concise, clean action title (2 to 6 words max). "
-            f"If the user asks about live events, songs, lyrics, current news, sports, weather, stock prices, or general facts, ALWAYS invoke the 'search_world_information' tool. "
-            f"Never output raw markdown formatting (*, #, emojis), XML tags, or code blocks."
+            f"Known user facts:\n{memory_context}\n"
+            f"Respond concisely, intelligently, and directly (1 to 3 sentences max). Answer the user's actual question with helpful substance. "
+            f"LANGUAGE SCRIPT RULES: "
+            f"1. For English questions, respond in English. "
+            f"2. For Hindi questions, ALWAYS write in native Devanagari Hindi script (हिंदी लिपी). "
+            f"3. For Marathi questions, ALWAYS write in native Devanagari Marathi script (मराठी लिपी). "
+            f"4. If the user asks to add, create, or remind them of a directive/task, invoke 'manage_tasks'. "
+            f"5. If the user asks about live events, songs, lyrics, current news, sports, weather, stock prices, or specific facts outside your certainty, invoke 'search_world_information'. "
+            f"Never output markdown symbols (*, #, emojis), XML tags, or raw code blocks."
         )
     }
 
@@ -419,12 +434,12 @@ def jarvis_api(request):
             messages=messages_payload,
             tools=TOOLS,
             tool_choice="auto",
-            temperature=0.4,
-            max_tokens=180
+            temperature=0.5,
+            max_tokens=220
         )
         response_msg = response.choices[0].message
 
-        # Handle tool execution
+        # Process Function / Tool Calls
         if response_msg.tool_calls:
             tool_messages = [
                 system_instruction,
@@ -473,14 +488,13 @@ def jarvis_api(request):
                         "content": str(search_results)
                     })
 
-            # Pass tools and tool_choice in synthesis call to prevent 400 error
             final_res = llm_client.chat.completions.create(
                 model=ACTIVE_GROQ_MODEL,
                 messages=tool_messages,
                 tools=TOOLS,
                 tool_choice="auto",
-                temperature=0.4,
-                max_tokens=180
+                temperature=0.5,
+                max_tokens=220
             )
             raw_reply = final_res.choices[0].message.content or ""
         else:
@@ -494,19 +508,20 @@ def jarvis_api(request):
                 model=FAST_FALLBACK_MODEL,
                 messages=[system_instruction, {"role": "user", "content": user_message}],
                 temperature=0.5,
-                max_tokens=180
+                max_tokens=200
             )
             raw_reply = fallback_res.choices[0].message.content or ""
         except Exception as final_err:
             print("❌ [FALLBACK FAILED]:", final_err)
-            raw_reply = f"All systems are online, {salutation}."
+            raw_reply = f"I am currently processing your request, {salutation}. Please ask once again."
 
+    # Clean text for Edge-TTS
     reply = re.sub(r'<function.*?</function>', '', raw_reply, flags=re.DOTALL)
     reply = re.sub(r'[{}\[\]*#`_~]', '', reply).strip()
     reply = re.sub(r'\b(साहेब|साहेबजी|जनाब|श्रीमान|महोदय)\b', 'सर', reply)
 
     if not reply:
-        reply = f"All systems operational, {salutation}."
+        reply = f"At your service, {salutation}."
 
     ChatMessage.objects.create(user=request.user, role='assistant', content=reply)
     audio_base64 = generate_voice_base64_sync(reply)
